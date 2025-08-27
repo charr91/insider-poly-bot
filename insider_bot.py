@@ -747,41 +747,6 @@ class UnusualActivityDetector:
         
         return results
 
-class InsiderTradingTracker:
-    """Track potential insider trading patterns"""
-    
-    def __init__(self):
-        self.tracked_wallets = {}  # Wallets with suspicious history
-        self.pattern_database = []  # Historical patterns
-        
-    def analyze_wallet_history(self, wallet_address: str) -> Dict:
-        """Analyze a wallet's trading history for insider patterns"""
-        patterns = {
-            'pre_announcement_trades': 0,
-            'accuracy_rate': 0,
-            'average_return': 0,
-            'markets_traded': [],
-            'suspicious_score': 0
-        }
-        
-        # Would query wallet's full history and look for:
-        # 1. Trades shortly before major news
-        # 2. Consistent winning on binary events
-        # 3. Large positions on obscure markets that resolve favorably
-        
-        return patterns
-    
-    def find_smart_money(self) -> List[str]:
-        """Identify wallets that consistently trade before news"""
-        smart_wallets = []
-        
-        # Scan for wallets that:
-        # - Trade 24-48 hours before announcements
-        # - Have >70% win rate on event markets
-        # - Make large concentrated bets
-        
-        return smart_wallets
-
 async def main():
     """Main execution"""
     # Load configuration (if running standalone)

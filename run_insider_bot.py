@@ -70,7 +70,7 @@ async def main():
     config = load_config()
     
     # Import after config check
-    from insider_bot import UnusualActivityDetector, InsiderTradingTracker
+    from insider_bot import UnusualActivityDetector
     
     logger.info("="*60)
     logger.info("🔍 UNUSUAL ACTIVITY DETECTION BOT")
