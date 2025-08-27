@@ -1,0 +1,25 @@
+{
+  "api": {
+    "simulation_mode": false
+  },
+  "monitoring": {
+    "markets": [],
+    "categories": [
+      "politics",
+      "entertainment",
+      "sports",
+      "crypto"
+    ],
+    "min_volume": 10000,
+    "check_interval": 60
+  },
+  "detection": {
+    "volume_spike_multiplier": 3.0,
+    "price_movement_threshold": 15,
+    "whale_threshold_usd": 10000,
+    "min_severity": "MEDIUM"
+  },
+  "alerts": {
+    "sound_alert": true
+  }
+}
