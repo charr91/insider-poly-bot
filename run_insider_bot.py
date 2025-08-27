@@ -37,8 +37,9 @@ def load_config():
         default_config = {
             "monitoring": {
                 "markets": [],  # Empty = monitor all top markets
-                "categories": ["politics", "entertainment", "sports", "crypto"],
-                "min_volume": 10000,
+                "volume_threshold": 1000,
+                "max_markets": 50,
+                "sort_by_volume": True,
                 "check_interval": 60
             },
             "detection": {
@@ -75,7 +76,8 @@ async def main():
     logger.info("="*60)
     logger.info("🔍 UNUSUAL ACTIVITY DETECTION BOT")
     logger.info("="*60)
-    logger.info(f"Monitoring categories: {config['monitoring']['categories']}")
+    logger.info(f"Volume threshold: ${config['monitoring']['volume_threshold']}")
+    logger.info(f"Max markets: {config['monitoring']['max_markets']}")
     logger.info(f"Min severity: {config['detection']['min_severity']}")
     
     # Initialize bot with config

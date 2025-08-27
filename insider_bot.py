@@ -137,22 +137,9 @@ class UnusualActivityDetector:
             return 0
     
         
-    async def fetch_market_data(self, session: aiohttp.ClientSession, condition_id: str) -> Dict:
-        """Fetch current market data with hybrid real/simulated approach"""
+    async def prepare_market_data(self, session: aiohttp.ClientSession, condition_id: str, market: Dict) -> Dict:
+        """Prepare market data using stored market info (avoids re-fetching)"""
         try:
-            # Find the market with this conditionId from gamma API
-            async with session.get(f"{self.gamma_api}/markets?conditionId={condition_id}") as resp:
-                if resp.status != 200:
-                    logger.warning(f"Failed to fetch market {condition_id}: HTTP {resp.status}")
-                    return None
-                
-                markets = await resp.json()
-                if not markets or not isinstance(markets, list) or len(markets) == 0:
-                    logger.warning(f"No market found for conditionId {condition_id}")
-                    return None
-                
-                market = markets[0]  # Take the first match
-            
             # Ensure market has required fields
             market['condition_id'] = condition_id
             market['question'] = market.get('question', 'Unknown Market')
@@ -175,13 +162,35 @@ class UnusualActivityDetector:
                     logger.warning(f"Failed to fetch real data for {condition_id}, skipping market")
                     return None
                 elif len(trades) == 0:
-                    logger.info(f"No recent trades found for {condition_id}, analysis will be limited")
+                    market_name = market.get('question', 'Unknown Market')[:50]
+                    logger.info(f"No recent trades found for '{market_name}...' (ID: {condition_id[:10]}...)")
+                    logger.debug(f"Full condition_id: {condition_id}")
             
             return {
                 'market': market,
                 'trades': trades,
                 'timestamp': datetime.now()
             }
+        except Exception as e:
+            logger.error(f"Error preparing market data for {condition_id}: {e}")
+            return None
+
+    async def fetch_market_data(self, session: aiohttp.ClientSession, condition_id: str) -> Dict:
+        """Fetch current market data with hybrid real/simulated approach (fallback method)"""
+        try:
+            # Find the market with this conditionId from gamma API
+            async with session.get(f"{self.gamma_api}/markets?conditionId={condition_id}") as resp:
+                if resp.status != 200:
+                    logger.warning(f"Failed to fetch market {condition_id}: HTTP {resp.status}")
+                    return None
+                
+                markets = await resp.json()
+                if not markets or not isinstance(markets, list) or len(markets) == 0:
+                    logger.warning(f"No market found for conditionId {condition_id}")
+                    return None
+                
+                market = markets[0]  # Take the first match
+                return await self.prepare_market_data(session, condition_id, market)
         except Exception as e:
             logger.error(f"Error fetching market {condition_id}: {e}")
             return None
@@ -245,9 +254,19 @@ class UnusualActivityDetector:
                         market_trades.append(trade)
                 
                 if market_trades:
-                    logger.info(f"✅ Found {len(market_trades)} trades for {condition_id}")
+                    logger.info(f"✅ Found {len(market_trades)} trades for {condition_id[:10]}...")
                 else:
-                    logger.debug(f"No trades found for {condition_id} from {len(recent_trades)} total trades")
+                    # Debug: Show what trades are available and why they don't match
+                    logger.debug(f"No trades match condition_id {condition_id[:10]}... from {len(recent_trades)} total trades")
+                    if recent_trades and logger.isEnabledFor(logging.DEBUG):
+                        logger.debug("Available trade markets:")
+                        for i, trade in enumerate(recent_trades[:3]):  # Show first 3
+                            trade_market = trade.get('market', 'NO_MARKET')
+                            trade_asset = trade.get('asset_id', 'NO_ASSET')
+                            logger.debug(f"  Trade {i+1}: market={trade_market[:15]}..., asset_id={str(trade_asset)[:15]}...")
+                        logger.debug(f"Looking for: condition_id={condition_id[:15]}...")
+                        if token_ids:
+                            logger.debug(f"Or token_ids: {[str(t)[:15] + '...' for t in token_ids[:2]]}")
                     
                 return market_trades
             else:
@@ -624,7 +643,12 @@ class UnusualActivityDetector:
                     # Get list of markets to monitor
                     if not market_ids:
                         # Get top markets by volume - using gamma API which has market data
-                        async with session.get(f"{self.gamma_api}/markets?active=true&closed=false&limit=20") as resp:
+                        volume_threshold = self.config.get('monitoring', {}).get('volume_threshold', 1000)
+                        max_markets = self.config.get('monitoring', {}).get('max_markets', 50)
+                        sort_by_volume = self.config.get('monitoring', {}).get('sort_by_volume', True)
+                        
+                        logger.info(f"🔍 Discovering top {max_markets} markets (min vol: ${volume_threshold}, sorted: {sort_by_volume})")
+                        async with session.get(f"{self.gamma_api}/markets?active=true&closed=false&limit={max_markets}") as resp:
                             if resp.status != 200:
                                 logger.error(f"Failed to fetch markets: HTTP {resp.status}")
                                 await asyncio.sleep(60)
@@ -655,32 +679,55 @@ class UnusualActivityDetector:
                                 await asyncio.sleep(60)
                                 continue
                             
-                            # Filter markets with sufficient volume
+                            # Sort markets by volume (highest first) if configured
+                            if sort_by_volume:
+                                try:
+                                    markets.sort(key=lambda m: float(m.get('volume24hr', 0)), reverse=True)
+                                    logger.debug(f"Sorted {len(markets)} markets by 24hr volume")
+                                except (ValueError, TypeError):
+                                    logger.warning("Could not sort markets by volume, proceeding without sorting")
+                            
+                            # Filter markets with sufficient volume and store complete market data
+                            markets_data = {}  # condition_id -> market_data
                             market_ids = []
-                            for m in markets[:10]:  # Limit to top 10 active markets to avoid rate limiting
+                            volume_threshold = self.config.get('monitoring', {}).get('volume_threshold', 1000)
+                            max_markets_to_process = self.config.get('monitoring', {}).get('max_markets', 50)
+                            
+                            processed_count = 0
+                            for m in markets:
+                                if processed_count >= max_markets_to_process:
+                                    break
+                                    
                                 try:
                                     # Get condition ID (this is the correct field)
                                     condition_id = m.get('conditionId', '')
                                     volume = float(m.get('volume24hr', 0))
                                     question = m.get('question', 'Unknown')
                                     
-                                    # Skip if no condition ID or very low volume
-                                    if condition_id and volume > 1000:  # Lower threshold for active markets
+                                    # Skip if no condition ID or below volume threshold
+                                    if condition_id and volume >= volume_threshold:
                                         market_ids.append(condition_id)
+                                        markets_data[condition_id] = m  # Store complete market data
                                         logger.info(f"Added market: {question[:50]}... (Vol: ${volume:.0f})")
+                                        processed_count += 1
                                 except (KeyError, ValueError, TypeError) as e:
                                     logger.warning(f"Error processing market: {e}")
                                     continue
                     
                     if not market_ids:
-                        logger.info("No active markets found with sufficient volume. Skipping this round.")
+                        logger.info(f"No active markets found above ${volume_threshold} volume threshold. Skipping this round.")
                         await asyncio.sleep(60)  # Wait and try again later
                         continue
                     
-                    logger.info(f"Monitoring {len(market_ids)} markets for unusual activity...")
+                    logger.info(f"📊 Monitoring {len(market_ids)} volume-filtered markets for unusual activity...")
                     
                     for market_id in market_ids:
-                        market_data = await self.fetch_market_data(session, market_id)
+                        # Use stored market data instead of re-fetching
+                        if market_id in markets_data:
+                            market_data = await self.prepare_market_data(session, market_id, markets_data[market_id])
+                        else:
+                            # Fallback to fetch if not in stored data
+                            market_data = await self.fetch_market_data(session, market_id)
                         
                         if market_data:
                             alerts = self.analyze_market(market_data)

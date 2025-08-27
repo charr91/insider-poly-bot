@@ -1,25 +1,53 @@
 {
   "api": {
-    "simulation_mode": false
+    "simulation_mode": false,
+    "data_api_base_url": "https://data-api.polymarket.com",
+    "websocket_url": "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+    "websocket_enabled": true
   },
   "monitoring": {
     "markets": [],
-    "categories": [
-      "politics",
-      "entertainment",
-      "sports",
-      "crypto"
-    ],
-    "min_volume": 10000,
-    "check_interval": 60
+    "volume_threshold": 1000,
+    "max_markets": 50,
+    "check_interval": 60,
+    "sort_by_volume": true,
+    "market_discovery_interval": 300,
+    "analysis_interval": 60
   },
   "detection": {
-    "volume_spike_multiplier": 3.0,
-    "price_movement_threshold": 15,
-    "whale_threshold_usd": 10000,
-    "min_severity": "MEDIUM"
+    "volume_thresholds": {
+      "volume_spike_multiplier": 3.0,
+      "z_score_threshold": 3.0
+    },
+    "whale_thresholds": {
+      "whale_threshold_usd": 10000,
+      "coordination_threshold": 0.7,
+      "min_whales_for_coordination": 3
+    },
+    "price_thresholds": {
+      "rapid_movement_pct": 15,
+      "price_movement_std": 2.5,
+      "volatility_spike_multiplier": 3.0,
+      "momentum_threshold": 0.8
+    },
+    "coordination_thresholds": {
+      "min_coordinated_wallets": 5,
+      "coordination_time_window": 30,
+      "directional_bias_threshold": 0.8,
+      "burst_intensity_threshold": 3.0
+    }
   },
   "alerts": {
-    "sound_alert": true
+    "discord_webhook": "",
+    "min_severity": "MEDIUM",
+    "max_alerts_per_hour": 10
+  },
+  "debug": {
+    "debug_mode": true,
+    "show_normal_activity": true,
+    "activity_report_interval": 30,
+    "show_trade_samples": true,
+    "verbose_analysis": true,
+    "websocket_activity_logging": true
   }
 }
