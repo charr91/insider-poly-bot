@@ -10,6 +10,10 @@ import threading
 import time
 from typing import List, Callable, Dict
 from datetime import datetime, timezone
+from colorama import init, Fore, Back, Style
+
+# Initialize colorama
+init(autoreset=True)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +68,7 @@ class WebSocketClient:
     
     def _on_open(self, ws):
         """Called when WebSocket connection is established"""
-        logger.info("✅ WebSocket connected")
+        print(f"{Fore.GREEN}✅ {Style.BRIGHT}WebSocket Connected{Style.RESET_ALL}")
         self.is_connected = True
         self.reconnect_attempts = 0
         
@@ -140,7 +144,9 @@ class WebSocketClient:
                     self.on_trade_callback(trade_data)
                     
                     if self.show_activity or self.debug_mode:
-                        logger.info(f"📈 Trade #{self.trades_processed}: ${trade_data.get('size', 0):.2f} @ {trade_data.get('price', 0):.3f} ({trade_data.get('side', 'UNK')})")
+                        side_color = Fore.GREEN if trade_data.get('side') == 'BUY' else Fore.RED
+                        print(f"{Fore.YELLOW}🚨 {Style.BRIGHT}TRADE DETECTED #{self.trades_processed}{Style.RESET_ALL}")
+                        print(f"   {Fore.CYAN}Size:{Style.RESET_ALL} {Fore.GREEN}${trade_data.get('size', 0):.2f}{Style.RESET_ALL} @ {Fore.WHITE}{trade_data.get('price', 0):.3f}{Style.RESET_ALL} {side_color}({trade_data.get('side', 'UNK')}){Style.RESET_ALL}")
                     else:
                         logger.debug(f"📈 Processed trade: {trade_data.get('size', 0)} @ {trade_data.get('price', 0)}")
                     
@@ -157,7 +163,7 @@ class WebSocketClient:
                     # Show first few order book updates to confirm we're getting data
                     market_id = data.get('market', data.get('asset_id', 'Unknown'))[:10]
                     msg_type_display = msg_type if msg_type else 'order_book'
-                    logger.info(f"📩 Order book update #{self.order_books_received}: {market_id}... ({msg_type_display})")
+                    print(f"{Fore.BLUE}📩 {Style.BRIGHT}Order Book #{self.order_books_received}:{Style.RESET_ALL} {Fore.CYAN}{market_id}...{Style.RESET_ALL} {Fore.WHITE}({msg_type_display}){Style.RESET_ALL}")
                 elif self.show_activity:
                     logger.debug(f"📩 Order book #{self.order_books_received} for market {data.get('market', 'Unknown')[:10]}...")
                 
@@ -177,10 +183,15 @@ class WebSocketClient:
                 else:
                     time_display = f"{int(time_since_last_report)} sec"
                 
-                logger.info(f"📊 WebSocket Activity (last {time_display}): "
-                          f"{self.messages_received} messages, "
-                          f"{self.trades_processed} trades, " 
-                          f"{self.order_books_received} order book updates")
+                # Create a nice activity report box with consistent width
+                title = f"─ WebSocket Activity ({time_display}) "
+                remaining_dashes = max(0, 48 - len(title))  # Target total width of 48 inside chars
+                top_border = f"┌{title}{'─' * remaining_dashes}┐"
+                total_width = len(top_border)
+                
+                print(f"{Fore.MAGENTA}{top_border}{Style.RESET_ALL}")
+                print(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Messages:{Style.RESET_ALL} {Fore.WHITE}{self.messages_received:>4}{Style.RESET_ALL} {Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Trades:{Style.RESET_ALL} {Fore.GREEN if self.trades_processed > 0 else Fore.YELLOW}{self.trades_processed:>4}{Style.RESET_ALL} {Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Books:{Style.RESET_ALL} {Fore.BLUE}{self.order_books_received:>4}{Style.RESET_ALL} {Fore.MAGENTA}│{Style.RESET_ALL}")
+                print(f"{Fore.MAGENTA}└{'─' * (total_width - 2)}┘{Style.RESET_ALL}")  # -2 for └┘
             
             # Reset counters for next period
             self.messages_received = 0

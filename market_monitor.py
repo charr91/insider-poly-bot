@@ -9,6 +9,10 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 import json
 from pathlib import Path
+from colorama import init, Fore, Back, Style
+
+# Initialize colorama
+init(autoreset=True)
 
 from data_sources.data_api_client import DataAPIClient
 from data_sources.websocket_client import WebSocketClient
@@ -359,34 +363,44 @@ class MarketMonitor:
     
     async def _generate_status_report(self):
         """Generate comprehensive status report"""
-        report_lines = []
+        print(f"\n{Fore.BLUE}┌{'─' * 58}┐{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}│{Fore.CYAN + Style.BRIGHT} 📊 SYSTEM STATUS {datetime.now().strftime('%H:%M:%S'):>39} {Fore.BLUE}│{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}├{'─' * 58}┤{Style.RESET_ALL}")
+        
+        # Format each line to exactly 56 characters + borders
+        def format_line(content):
+            # Remove ALL ANSI codes to measure actual text length
+            import re
+            clean_content = re.sub(r'\x1b\[[0-9;]*[mGKHJ]', '', content)
+            padding = max(0, 56 - len(clean_content))
+            return f"{Fore.BLUE}│{Style.RESET_ALL} {content}{' ' * padding}{Fore.BLUE}│{Style.RESET_ALL}"
         
         # Basic system status
-        report_lines.append(f"📊 System Status Report ({datetime.now().strftime('%H:%M:%S')})")
-        report_lines.append(f"   Markets monitored: {len(self.monitored_markets)}")
-        report_lines.append(f"   Analyses completed: {self.analysis_count}")
-        report_lines.append(f"   Alerts generated: {self.alerts_generated}")
+        print(format_line(f"{Fore.CYAN}Markets:{Style.RESET_ALL} {Fore.GREEN}{len(self.monitored_markets)}{Style.RESET_ALL} monitored"))
+        print(format_line(f"{Fore.CYAN}Analyses:{Style.RESET_ALL} {Fore.YELLOW}{self.analysis_count}{Style.RESET_ALL} completed"))
+        print(format_line(f"{Fore.CYAN}Alerts:{Style.RESET_ALL} {Fore.RED if self.alerts_generated > 0 else Fore.GREEN}{self.alerts_generated}{Style.RESET_ALL} generated"))
         
         # WebSocket status
         if self.websocket_client:
             ws_stats = self.websocket_client.get_activity_stats()
-            status = "🟢 Connected" if ws_stats['is_connected'] else "🔴 Disconnected"
-            report_lines.append(f"   WebSocket: {status}")
-            report_lines.append(f"   Recent activity: {ws_stats['messages_received']} msgs, {ws_stats['trades_processed']} trades")
+            status_color = Fore.GREEN if ws_stats['is_connected'] else Fore.RED
+            status_text = "Connected" if ws_stats['is_connected'] else "Disconnected"
+            print(format_line(f"{Fore.CYAN}WebSocket:{Style.RESET_ALL} {status_color}{status_text}{Style.RESET_ALL}"))
+            print(format_line(f"  {Fore.WHITE}Activity:{Style.RESET_ALL} {ws_stats['messages_received']} msgs, {ws_stats['trades_processed']} trades"))
         else:
-            report_lines.append("   WebSocket: Not initialized")
+            print(format_line(f"{Fore.CYAN}WebSocket:{Style.RESET_ALL} {Fore.RED}Not initialized{Style.RESET_ALL}"))
         
         # Trade history summary
         total_trades_stored = sum(len(trades) for trades in self.trade_history.values())
-        report_lines.append(f"   Trade history: {total_trades_stored} trades across {len(self.trade_history)} markets")
+        print(format_line(f"{Fore.CYAN}History:{Style.RESET_ALL} {total_trades_stored} trades across {len(self.trade_history)} markets"))
         
         # Data API status
-        api_status = "🟢 Operational" if self.data_api.test_connection() else "🔴 Failed"
-        report_lines.append(f"   Data API: {api_status}")
+        api_operational = self.data_api.test_connection()
+        api_status_color = Fore.GREEN if api_operational else Fore.RED
+        api_status_text = "Operational" if api_operational else "Failed"
+        print(format_line(f"{Fore.CYAN}Data API:{Style.RESET_ALL} {api_status_color}{api_status_text}{Style.RESET_ALL}"))
         
-        # Log the complete report
-        for line in report_lines:
-            logger.info(line)
+        print(f"{Fore.BLUE}└{'─' * 58}┘{Style.RESET_ALL}\n")
     
     def _handle_realtime_trade(self, trade_data: Dict):
         """Handle incoming real-time trade data"""
@@ -454,8 +468,10 @@ class MarketMonitor:
         
         # Summary log for this analysis round
         if self.debug_mode or self.show_normal_activity or alerts_this_round > 0:
-            logger.info(f"🔍 Analysis #{self.analysis_count} complete: "
-                       f"{alerts_this_round} alerts from {markets_with_data} markets with data")
+            alert_color = Fore.RED if alerts_this_round > 0 else Fore.GREEN
+            status_emoji = "🚨" if alerts_this_round > 0 else "✅"
+            print(f"{Fore.CYAN}{status_emoji} {Style.BRIGHT}Analysis #{self.analysis_count} Complete{Style.RESET_ALL}")
+            print(f"   {alert_color}{alerts_this_round}{Style.RESET_ALL} alerts from {Fore.BLUE}{markets_with_data}{Style.RESET_ALL} markets with data")
             
         if alerts_this_round > 0:
             self.alerts_generated += alerts_this_round
