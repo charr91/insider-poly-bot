@@ -46,7 +46,7 @@ class MarketMonitor:
         self.coordination_detector = CoordinationDetector(self.config)
         
         # Initialize alert manager
-        self.alert_manager = AlertManager(self.config)
+        self.alert_manager = AlertManager(self.settings)
         
         # Market data storage
         self.monitored_markets = {}

@@ -50,6 +50,7 @@ class AlertSettings:
     """Settings for alert management"""
     discord_webhook: str = ""
     min_severity: str = "MEDIUM"
+    discord_min_severity: str = "MEDIUM"
     max_alerts_per_hour: int = 10
     duplicate_window_minutes: int = 10
 
@@ -164,6 +165,7 @@ class Settings:
         return AlertSettings(
             discord_webhook=os.getenv('DISCORD_WEBHOOK', alert_config.get('discord_webhook', '')),
             min_severity=alert_config.get('min_severity', 'MEDIUM'),
+            discord_min_severity=alert_config.get('discord_min_severity', 'MEDIUM'),
             max_alerts_per_hour=alert_config.get('max_alerts_per_hour', 10),
             duplicate_window_minutes=alert_config.get('duplicate_window_minutes', 10)
         )

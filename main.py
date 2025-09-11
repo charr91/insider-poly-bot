@@ -9,6 +9,10 @@ import logging
 import sys
 from pathlib import Path
 from colorama import init, Fore, Back, Style
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Initialize colorama for cross-platform colored output
 init(autoreset=True)

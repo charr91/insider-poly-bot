@@ -7,7 +7,7 @@ import asyncio
 import aiohttp
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Union
 import os
 
 logger = logging.getLogger(__name__)
@@ -15,21 +15,31 @@ logger = logging.getLogger(__name__)
 class AlertManager:
     """Manages alert notifications across different channels"""
     
-    def __init__(self, config: Dict = None):
-        self.config = config or {}
-        self.alert_config = self.config.get('alerts', {})
-        
-        # Discord configuration
-        self.discord_webhook = os.getenv('DISCORD_WEBHOOK', self.alert_config.get('discord_webhook', ''))
+    def __init__(self, settings_or_config=None):
+        # Support both old config dict format and new Settings object for backward compatibility
+        if hasattr(settings_or_config, 'alerts'):
+            # New Settings object format
+            settings = settings_or_config
+            self.discord_webhook = settings.alerts.discord_webhook
+            self.min_severity = settings.alerts.min_severity
+            self.discord_min_severity = settings.alerts.discord_min_severity
+            self.max_alerts_per_hour = settings.alerts.max_alerts_per_hour
+        else:
+            # Old config dict format (fallback)
+            config = settings_or_config or {}
+            alert_config = config.get('alerts', {})
+            self.discord_webhook = os.getenv('DISCORD_WEBHOOK', alert_config.get('discord_webhook', ''))
+            self.min_severity = alert_config.get('min_severity', 'MEDIUM')
+            self.discord_min_severity = alert_config.get('discord_min_severity', 'MEDIUM')
+            self.max_alerts_per_hour = alert_config.get('max_alerts_per_hour', 10)
         
         # Alert filtering
-        self.min_severity = self.alert_config.get('min_severity', 'MEDIUM')
         self.severity_levels = {'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4}
         self.min_severity_level = self.severity_levels.get(self.min_severity, 2)
+        self.discord_min_severity_level = self.severity_levels.get(self.discord_min_severity, 2)
         
         # Rate limiting
         self.alert_history = []
-        self.max_alerts_per_hour = 10
         
     async def send_alert(self, alert: Dict):
         """Send alert through configured channels"""
@@ -51,8 +61,15 @@ class AlertManager:
             # Send through channels
             await self._send_console_alert(alert)
             
-            if self.discord_webhook and alert_severity_level >= 3:  # HIGH and CRITICAL only
-                await self._send_discord_alert(alert)
+            # Discord routing decision
+            if self.discord_webhook:
+                if alert_severity_level >= self.discord_min_severity_level:
+                    logger.debug(f"📱 Sending to Discord: {alert.get('severity')} alert (level {alert_severity_level}) >= {self.discord_min_severity} threshold")
+                    await self._send_discord_alert(alert)
+                else:
+                    logger.debug(f"📱 Skipping Discord: {alert.get('severity')} alert (level {alert_severity_level}) below {self.discord_min_severity} threshold")
+            else:
+                logger.debug("📱 Discord webhook not configured")
             
             # Record alert
             self.alert_history.append({
@@ -149,7 +166,7 @@ class AlertManager:
             async with aiohttp.ClientSession() as session:
                 payload = {"embeds": [embed]}
                 async with session.post(self.discord_webhook, json=payload, timeout=10) as resp:
-                    if resp.status == 200:
+                    if resp.status in [200, 204]:  # Discord returns 204 for successful webhooks
                         logger.debug("Discord alert sent successfully")
                     else:
                         logger.warning(f"Discord webhook returned status {resp.status}")
@@ -261,6 +278,7 @@ class AlertManager:
         
         # Test Discord webhook
         if self.discord_webhook:
+            logger.info(f"🔗 Testing Discord webhook: {self.discord_webhook[:50]}...")
             try:
                 test_embed = {
                     "title": "🧪 Test Alert",
@@ -273,13 +291,17 @@ class AlertManager:
                 async with aiohttp.ClientSession() as session:
                     payload = {"embeds": [test_embed]}
                     async with session.post(self.discord_webhook, json=payload, timeout=10) as resp:
-                        if resp.status == 200:
+                        response_text = await resp.text()
+                        if resp.status in [200, 204]:  # Discord returns 204 for successful webhooks
                             logger.info("✅ Discord webhook test successful")
                         else:
                             logger.warning(f"⚠️ Discord webhook test failed: HTTP {resp.status}")
+                            logger.warning(f"   Response: {response_text[:200]}")
             
             except Exception as e:
                 logger.error(f"❌ Discord webhook test failed: {e}")
+                import traceback
+                logger.error(f"   Full error: {traceback.format_exc()}")
         else:
             logger.info("ℹ️ No Discord webhook configured")
         
