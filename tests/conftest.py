@@ -1,242 +1,137 @@
 """
-Global pytest configuration and fixtures.
+Pytest configuration and shared fixtures
 """
+
 import pytest
-import asyncio
-import sys
 import os
-from unittest.mock import Mock, AsyncMock, patch
-from typing import Dict, Any, List
-import pandas as pd
-import numpy as np
+import sys
+from pathlib import Path
 
 # Add project root to Python path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-from config.settings import Settings
-from detection.volume_detector import VolumeDetector
-from detection.whale_detector import WhaleDetector
-from detection.price_detector import PriceDetector
-from detection.coordination_detector import CoordinationDetector
+# Test configuration
+pytest_plugins = []
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture
-def mock_settings():
-    """Mock settings configuration for testing."""
-    return Settings(
-        detection_thresholds={
-            "volume_spike_multiplier": 5.0,
-            "whale_threshold_usd": 10000.0,
-            "price_change_threshold": 0.05,
-            "coordination_time_window": 300
-        },
-        notification_channels={
-            "enabled": False  # Disable notifications in tests
-        },
-        polymarket_config={
-            "api_base_url": "https://gamma-api.polymarket.com",
-            "websocket_url": "wss://ws-subscriptions-clob.polymarket.com"
-        }
+def pytest_configure(config):
+    """Configure pytest with custom markers"""
+    config.addinivalue_line(
+        "markers", "integration: mark test as integration test (may require external services)"
+    )
+    config.addinivalue_line(
+        "markers", "slow: mark test as slow (may take several seconds)"
     )
 
 
-@pytest.fixture
-def volume_detector(mock_settings):
-    """Create VolumeDetector instance for testing."""
-    return VolumeDetector(mock_settings)
+def pytest_collection_modifyitems(config, items):
+    """Modify test collection to add markers automatically"""
+    for item in items:
+        # Add integration marker to integration tests
+        if "integration" in str(item.fspath):
+            item.add_marker(pytest.mark.integration)
+        
+        # Add slow marker to tests that might be slow
+        if any(keyword in item.name for keyword in ["api", "websocket", "connection"]):
+            item.add_marker(pytest.mark.slow)
 
 
-@pytest.fixture
-def whale_detector(mock_settings):
-    """Create WhaleDetector instance for testing."""
-    return WhaleDetector(mock_settings)
-
-
-@pytest.fixture
-def price_detector(mock_settings):
-    """Create PriceDetector instance for testing."""
-    return PriceDetector(mock_settings)
-
-
-@pytest.fixture
-def coordination_detector(mock_settings):
-    """Create CoordinationDetector instance for testing."""
-    return CoordinationDetector(mock_settings)
-
-
-@pytest.fixture
-def sample_trade_data():
-    """Generate sample trade data for testing."""
+@pytest.fixture(scope="session")
+def test_config():
+    """Provide test configuration"""
     return {
-        "market_id": "test_market_123",
-        "trade_id": "trade_456",
-        "maker": "0x1234567890abcdef",
-        "taker": "0xfedcba0987654321",
-        "size": "1000.0",
-        "price": "0.55",
-        "side": "BUY",
-        "timestamp": 1640995200,
-        "outcome": "YES",
-        "asset_id": "asset_789"
+        'monitoring': {
+            'max_markets': 5,
+            'volume_threshold': 1000,
+            'check_interval': 60,
+            'sort_by_volume': True,
+            'market_discovery_interval': 300,
+            'analysis_interval': 60
+        },
+        'detection': {
+            'volume_thresholds': {
+                'volume_spike_multiplier': 3.0,
+                'z_score_threshold': 3.0
+            },
+            'whale_thresholds': {
+                'whale_threshold_usd': 10000,
+                'coordination_threshold': 0.7,
+                'min_whales_for_coordination': 3
+            }
+        },
+        'alerts': {
+            'discord_webhook': '',
+            'min_severity': 'MEDIUM',
+            'discord_min_severity': 'MEDIUM',
+            'max_alerts_per_hour': 10
+        },
+        'debug': {
+            'debug_mode': False,
+            'show_normal_activity': False,
+            'activity_report_interval': 300,
+            'verbose_analysis': False,
+            'websocket_activity_logging': False
+        },
+        'api': {
+            'simulation_mode': True,
+            'data_api_base_url': 'https://data-api.polymarket.com',
+            'websocket_url': 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
+            'websocket_enabled': True
+        }
     }
 
 
 @pytest.fixture
-def sample_trades_df():
-    """Generate pandas DataFrame with sample trades."""
-    trades_data = [
-        {
-            "market_id": "market_1",
-            "trade_id": f"trade_{i}",
-            "maker": f"0x{'1' * 40}",
-            "taker": f"0x{'2' * 40}",
-            "size": 1000.0 + i * 100,
-            "price": 0.5 + i * 0.01,
-            "side": "BUY" if i % 2 == 0 else "SELL",
-            "timestamp": 1640995200 + i * 60,
-            "outcome": "YES",
-            "asset_id": "asset_1"
-        }
-        for i in range(10)
-    ]
-    return pd.DataFrame(trades_data)
-
-
-@pytest.fixture
-def sample_whale_trades():
-    """Generate sample whale trade data."""
-    return [
-        {
-            "market_id": "market_whale",
-            "trade_id": "whale_trade_1",
-            "maker": "0xwhale123",
-            "taker": "0xwhale456",
-            "size": "50000.0",  # Large size
-            "price": "0.60",
-            "side": "BUY",
-            "timestamp": 1640995200,
-            "outcome": "YES",
-            "asset_id": "asset_whale"
-        },
-        {
-            "market_id": "market_whale",
-            "trade_id": "whale_trade_2",
-            "maker": "0xwhale456",
-            "taker": "0xwhale789",
-            "size": "75000.0",  # Very large size
-            "price": "0.62",
-            "side": "BUY",
-            "timestamp": 1640995260,
-            "outcome": "YES",
-            "asset_id": "asset_whale"
-        }
-    ]
-
-
-@pytest.fixture
-def mock_websocket_messages():
-    """Mock WebSocket messages for testing."""
-    return [
-        {
-            "type": "trade",
-            "data": {
-                "market_id": "ws_market_1",
-                "trade_id": "ws_trade_1",
-                "maker": "0xwebsocket1",
-                "taker": "0xwebsocket2",
-                "size": "2000.0",
-                "price": "0.45",
-                "side": "SELL",
-                "timestamp": 1640995300,
-                "outcome": "NO"
-            }
-        },
-        {
-            "type": "order",
-            "data": {
-                "market_id": "ws_market_1",
-                "order_id": "ws_order_1",
-                "maker": "0xwebsocket3",
-                "size": "5000.0",
-                "price": "0.50",
-                "side": "BUY",
-                "timestamp": 1640995350,
-                "outcome": "YES"
-            }
-        }
-    ]
-
-
-@pytest.fixture
-def mock_api_response():
-    """Mock API response data."""
-    return {
-        "trades": [
-            {
-                "id": "api_trade_1",
-                "market": "api_market_1",
-                "maker": "0xapi1",
-                "taker": "0xapi2",
-                "size": "1500.0",
-                "price": "0.48",
-                "side": "BUY",
-                "timestamp": 1640995400,
-                "outcome": "YES"
-            }
-        ],
-        "next_cursor": "next_page_token"
+def clean_environment():
+    """Ensure clean test environment"""
+    # Store original environment
+    original_env = dict(os.environ)
+    
+    # Set test environment variables
+    test_env = {
+        'DISCORD_WEBHOOK': '',
+        'CLOB_API_KEY': 'test_key',
+        'CLOB_API_SECRET': 'test_secret',
+        'CLOB_API_PASSPHRASE': 'test_pass',
+        'POLYGON_PRIVATE_KEY': '0x' + '0' * 64,
+        'FUNDER_ADDRESS': '0x' + '0' * 40
     }
-
-
-@pytest.fixture
-def mock_aiohttp_session():
-    """Mock aiohttp session for API testing."""
-    with patch('aiohttp.ClientSession') as mock_session:
-        mock_instance = AsyncMock()
-        mock_session.return_value.__aenter__.return_value = mock_instance
-        yield mock_instance
-
-
-@pytest.fixture
-def mock_websocket():
-    """Mock websocket connection for testing."""
-    with patch('websocket.WebSocket') as mock_ws:
-        mock_instance = Mock()
-        mock_ws.return_value = mock_instance
-        yield mock_instance
+    
+    os.environ.update(test_env)
+    
+    yield
+    
+    # Restore original environment
+    os.environ.clear()
+    os.environ.update(original_env)
 
 
 @pytest.fixture(autouse=True)
-def isolate_tests(tmp_path, monkeypatch):
-    """Isolate tests by using temporary directory and environment variables."""
-    # Use temporary directory for any file operations
-    monkeypatch.chdir(tmp_path)
+def setup_test_logging():
+    """Setup logging for tests"""
+    import logging
     
-    # Set test environment variables
-    monkeypatch.setenv("POLYMARKET_API_KEY", "test_api_key")
-    monkeypatch.setenv("ENVIRONMENT", "test")
-    
-    # Mock any external dependencies
-    with patch('alerts.alert_manager.AlertManager'):
-        yield
+    # Reduce log level for external libraries during tests
+    logging.getLogger('websocket').setLevel(logging.WARNING)
+    logging.getLogger('aiohttp').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 
-@pytest.fixture
-def performance_baseline():
-    """Baseline performance metrics for regression testing."""
-    return {
-        "volume_detection_time": 0.001,  # 1ms
-        "whale_detection_time": 0.002,   # 2ms
-        "price_detection_time": 0.001,   # 1ms
-        "coordination_detection_time": 0.005,  # 5ms
-        "memory_usage_mb": 50.0,  # 50MB
-        "cpu_usage_percent": 5.0  # 5% CPU
-    }
+# Skip only Discord integration tests by default (they require real webhooks)
+def pytest_runtest_setup(item):
+    """Setup hook to handle test execution"""
+    # Skip only Discord integration tests that require real external services
+    if "integration" in item.keywords and "discord" in str(item.fspath).lower():
+        if not item.config.getoption("--run-integration"):
+            pytest.skip("Discord integration tests disabled (use --run-integration to enable)")
+
+
+def pytest_addoption(parser):
+    """Add command line options"""
+    parser.addoption(
+        "--run-integration",
+        action="store_true",
+        default=False,
+        help="Run integration tests (requires external services)"
+    )

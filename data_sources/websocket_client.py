@@ -218,6 +218,10 @@ class WebSocketClient:
         time_since_last_report = (now - self.last_activity_report).total_seconds()
         
         if time_since_last_report >= self.activity_report_interval:
+            if self.show_activity:
+                print(f"📊 WebSocket Activity: {self.messages_received} messages, "
+                      f"{self.trades_processed} trades, {self.order_books_received} order books")
+            
             # Reset counters for next period and update stats tracking
             self.messages_received = 0
             self.trades_processed = 0  
