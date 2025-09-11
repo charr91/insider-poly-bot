@@ -4,8 +4,9 @@ Fetches historical and current trade data from public API
 """
 
 import requests
+import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 import time
 
@@ -39,7 +40,7 @@ class DataAPIClient:
             logger.debug(f"Fetched {len(trades)} trades for market {market_id[:10]}...")
             return trades
             
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
             logger.error(f"Error fetching trades for market {market_id[:10]}...: {e}")
             return []
     
@@ -63,7 +64,7 @@ class DataAPIClient:
             logger.debug(f"Fetched {len(trades)} recent trades{market_info}")
             return trades
             
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
             logger.error(f"Error fetching recent trades: {e}")
             return []
     
@@ -71,7 +72,7 @@ class DataAPIClient:
         """Get historical trades within a time window for baseline analysis"""
         all_trades = []
         offset = 0
-        cutoff_time = datetime.now() - timedelta(hours=lookback_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
         while True:
             trades = self.get_market_trades(market_id, limit=500, offset=offset)
@@ -87,7 +88,7 @@ class DataAPIClient:
                     timestamp = trade.get('timestamp')
                     if timestamp:
                         if isinstance(timestamp, (int, float)):
-                            trade_time = datetime.fromtimestamp(timestamp)
+                            trade_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
                         else:
                             # ISO format
                             trade_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
@@ -128,7 +129,7 @@ class DataAPIClient:
             logger.debug(f"Fetched {len(trades)} recent trades across all markets")
             return trades
             
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
             logger.error(f"Error fetching all recent trades: {e}")
             return []
     

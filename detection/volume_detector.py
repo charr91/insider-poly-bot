@@ -7,6 +7,7 @@ import pandas as pd
 from typing import Dict, List, Tuple
 from datetime import datetime, timezone, timedelta
 import logging
+from .utils import TradeNormalizer, ThresholdValidator, create_consistent_early_return
 
 logger = logging.getLogger(__name__)
 
@@ -31,29 +32,16 @@ class VolumeDetector:
         if not trades:
             return {}
         
-        # Normalize trade data to handle different field names
-        normalized_trades = []
-        for trade in trades:
-            try:
-                normalized = {
-                    'timestamp': trade.get('timestamp', trade.get('createdAt', trade.get('created_at', ''))),
-                    'price': float(trade.get('price', trade.get('feeRate', trade.get('outcome_price', 0)))),
-                    'size': float(trade.get('size', trade.get('amount', trade.get('shares', 1)))),
-                }
-                if normalized['timestamp'] and normalized['price'] > 0:
-                    normalized_trades.append(normalized)
-            except (ValueError, TypeError):
-                continue
+        # Normalize trade data using utility
+        normalized_trades = TradeNormalizer.normalize_trades(trades)
         
         if not normalized_trades:
             return {}
         
         df = pd.DataFrame(normalized_trades)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df['volume_usd'] = df['price'] * df['size']
+        # volume_usd already calculated in normalization
         
         # Calculate hourly metrics
-        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
         df.set_index('timestamp', inplace=True)
         
         # Calculate volume properly
@@ -96,15 +84,19 @@ class VolumeDetector:
         if avg_volume == 0:
             return False, 0, {'reason': 'Zero baseline volume'}
         
-        # Calculate z-score
-        z_score = (current_volume - avg_volume) / (std_volume + 1e-8)
+        # Calculate z-score using utility
+        z_score = ThresholdValidator.calculate_z_score(current_volume, avg_volume, std_volume)
         
         # Calculate spike multiplier
-        spike_multiplier = current_volume / (avg_volume + 1e-8)
+        spike_multiplier = current_volume / (avg_volume + ThresholdValidator.FLOAT_TOLERANCE)
         
-        # Check if volume spike exceeds thresholds
-        spike_anomaly = spike_multiplier > self.thresholds['volume_spike_multiplier']
-        z_anomaly = z_score > self.thresholds['z_score_threshold']
+        # Check if volume spike exceeds thresholds using utility
+        spike_anomaly = ThresholdValidator.meets_threshold(
+            spike_multiplier, self.thresholds['volume_spike_multiplier'], inclusive=True
+        )
+        z_anomaly = ThresholdValidator.meets_threshold(
+            z_score, self.thresholds['z_score_threshold'], inclusive=True
+        )
         
         is_anomaly = spike_anomaly or z_anomaly
         
@@ -127,53 +119,42 @@ class VolumeDetector:
         if not trades:
             return 0
         
-        # Normalize trade data
-        recent_trades = []
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+        # Normalize all trades first
+        normalized_trades = TradeNormalizer.normalize_trades(trades)
+        if not normalized_trades:
+            return 0
         
-        for trade in trades:
-            try:
-                # Handle different timestamp formats
-                ts = trade.get('timestamp', trade.get('createdAt', trade.get('created_at', '')))
-                if ts:
-                    # Parse timestamp
-                    if 'Z' in ts:
-                        ts = ts.replace('Z', '+00:00')
-                    
-                    if 'T' in ts:
-                        trade_time = datetime.fromisoformat(ts)
-                    else:
-                        trade_time = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
-                        trade_time = trade_time.replace(tzinfo=timezone.utc)
-                    
-                    # Check if within time window
-                    if trade_time > cutoff_time:
-                        recent_trades.append(trade)
-            except (ValueError, TypeError, AttributeError):
-                continue
+        # Find the most recent timestamp in the data
+        latest_timestamp = max(trade['timestamp'].to_pydatetime() for trade in normalized_trades)
         
-        # Calculate total volume
+        # Use the latest timestamp from data, or current time if no valid timestamps
+        reference_time = latest_timestamp if latest_timestamp else datetime.now(timezone.utc)
+        cutoff_time = reference_time - timedelta(hours=window_hours)
+        
+        # Filter trades within time window and calculate volume
         total_volume = 0
-        for trade in recent_trades:
-            try:
-                price = float(trade.get('price', trade.get('feeRate', trade.get('outcome_price', 0))))
-                size = float(trade.get('size', trade.get('amount', trade.get('shares', 1))))
-                total_volume += price * size
-            except (ValueError, TypeError):
-                continue
+        for trade in normalized_trades:
+            if trade['timestamp'].to_pydatetime() > cutoff_time:
+                total_volume += trade['volume_usd']
         
         return total_volume
     
     def analyze_volume_pattern(self, trades: List[Dict]) -> Dict:
         """Analyze volume patterns over different time windows"""
         if not trades:
-            return {'anomaly': False, 'reason': 'No trades available'}
+            return create_consistent_early_return(
+                anomaly=False, 
+                reason='No trades available'
+            )
         
         # Calculate baseline from all available trades
         baseline = self.calculate_baseline_metrics(trades)
         
         if not baseline:
-            return {'anomaly': False, 'reason': 'Unable to calculate baseline metrics'}
+            return create_consistent_early_return(
+                anomaly=False, 
+                reason='Unable to calculate baseline metrics'
+            )
         
         # Check different time windows
         windows = [1, 2, 4, 6]  # hours

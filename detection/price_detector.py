@@ -7,6 +7,7 @@ import pandas as pd
 from typing import Dict, List, Tuple
 from datetime import datetime, timedelta, timezone
 import logging
+from .utils import TradeNormalizer, ThresholdValidator, create_consistent_early_return
 
 logger = logging.getLogger(__name__)
 
@@ -28,49 +29,67 @@ class PriceDetector:
             if 'price_thresholds' in detection_config:
                 self.thresholds.update(detection_config['price_thresholds'])
     
+    def _create_price_early_return(self, reason: str, window_minutes: int) -> Dict:
+        """Create consistent early return structure for price detection"""
+        empty_analysis = {
+            'price_start': 0, 'price_end': 0, 'price_high': 0, 'price_low': 0,
+            'price_change_abs': 0, 'price_change_pct': 0, 'price_range': 0,
+            'trend_direction': 'neutral', 'momentum_score': 0,
+            'recent_volatility': 0, 'historical_volatility': 0, 'volatility_spike': 0,
+            'price_change_std_score': 0, 'ma_divergence': 0, 'trade_count': 0
+        }
+        
+        return create_consistent_early_return(
+            anomaly=False,
+            reason=reason,
+            additional_fields={
+                'window_minutes': window_minutes,
+                'triggers': {'rapid_movement': False, 'volatility_spike': False, 'high_momentum': False},
+                'analysis': empty_analysis
+            }
+        )
+    
     def detect_price_movement(self, trades: List[Dict], window_minutes: int = 60) -> Dict:
         """Detect unusual price movements within a time window"""
         if not trades or len(trades) < 2:
-            return {'anomaly': False, 'reason': 'Insufficient trade data'}
+            return self._create_price_early_return(
+                'Insufficient trade data', window_minutes
+            )
         
-        # Normalize trade data
-        normalized_trades = []
-        for trade in trades:
-            try:
-                timestamp = trade.get('timestamp', trade.get('createdAt', trade.get('created_at', '')))
-                price = float(trade.get('price', trade.get('feeRate', trade.get('outcome_price', 0))))
-                
-                if timestamp and price > 0:
-                    normalized_trades.append({
-                        'timestamp': timestamp,
-                        'price': price
-                    })
-            except (ValueError, TypeError):
-                continue
+        # Normalize trade data using utility
+        normalized_trades = TradeNormalizer.normalize_trades(trades)
         
         if len(normalized_trades) < 2:
-            return {'anomaly': False, 'reason': 'Insufficient valid trades after normalization'}
+            return self._create_price_early_return(
+                'Insufficient valid trades after normalization', window_minutes
+            )
         
         df = pd.DataFrame(normalized_trades)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['price'] = df['price'].astype(float)
         df = df.sort_values('timestamp')
         
         # Get trades from specified time window
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
-        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
         recent = df[df['timestamp'] > cutoff]
         
         if len(recent) < 2:
-            return {'anomaly': False, 'reason': f'Less than 2 trades in last {window_minutes} minutes'}
+            return self._create_price_early_return(
+                f'Less than 2 trades in last {window_minutes} minutes', window_minutes
+            )
         
         # Analyze price movement
         analysis = self._analyze_price_pattern(recent, df)
         
-        # Check for anomalies
-        rapid_movement = abs(analysis['price_change_pct']) > self.thresholds['rapid_movement_pct']
-        unusual_volatility = analysis['volatility_spike'] > self.thresholds['volatility_spike_multiplier']
-        high_momentum = analysis['momentum_score'] > self.thresholds['momentum_threshold']
+        # Check for anomalies using threshold validator
+        rapid_movement = ThresholdValidator.meets_threshold(
+            abs(analysis['price_change_pct']), self.thresholds['rapid_movement_pct'], inclusive=False
+        )
+        unusual_volatility = ThresholdValidator.meets_threshold(
+            analysis['volatility_spike'], self.thresholds['volatility_spike_multiplier'], inclusive=False
+        )
+        high_momentum = ThresholdValidator.meets_threshold(
+            analysis['momentum_score'], self.thresholds['momentum_threshold'], inclusive=False
+        )
         
         anomaly_detected = rapid_movement or unusual_volatility or high_momentum
         
@@ -160,34 +179,25 @@ class PriceDetector:
     def detect_accumulation_pattern(self, trades: List[Dict]) -> Dict:
         """Detect price accumulation/distribution patterns"""
         if not trades or len(trades) < 10:
-            return {'anomaly': False, 'reason': 'Insufficient trades for pattern analysis'}
+            return create_consistent_early_return(
+                anomaly=False, 
+                reason='Insufficient trades for pattern analysis'
+            )
         
-        # Normalize and sort trades
-        normalized_trades = []
-        for trade in trades:
-            try:
-                timestamp = trade.get('timestamp', trade.get('createdAt', trade.get('created_at', '')))
-                price = float(trade.get('price', trade.get('feeRate', trade.get('outcome_price', 0))))
-                size = float(trade.get('size', trade.get('amount', trade.get('shares', 1))))
-                
-                if timestamp and price > 0:
-                    normalized_trades.append({
-                        'timestamp': timestamp,
-                        'price': price,
-                        'size': size
-                    })
-            except (ValueError, TypeError):
-                continue
+        # Normalize trades using utility
+        normalized_trades = TradeNormalizer.normalize_trades(trades)
         
         if len(normalized_trades) < 10:
-            return {'anomaly': False, 'reason': 'Insufficient valid trades'}
+            return create_consistent_early_return(
+                anomaly=False, 
+                reason='Insufficient valid trades'
+            )
         
         df = pd.DataFrame(normalized_trades)
-        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
         df = df.sort_values('timestamp')
         
         # Calculate volume-weighted average price (VWAP)
-        df['volume'] = df['price'] * df['size']
+        df['volume'] = df['volume_usd']  # Already calculated in normalization
         cumulative_volume = df['volume'].cumsum()
         cumulative_size = df['size'].cumsum()
         df['vwap'] = cumulative_volume / cumulative_size

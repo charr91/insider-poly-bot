@@ -10,9 +10,10 @@ A sophisticated bot that monitors Polymarket trading activity to identify potent
 |----------|-------------|
 | **[📖 Configuration Guide](CONFIGURATION.md)** | Complete reference for `insider_config.json` parameters and setup |
 | **[💻 Usage Examples](USAGE.md)** | Detailed usage patterns, commands, and operational scenarios |
+| **[🧪 Testing Guide](TESTING.md)** | Comprehensive testing documentation and development guidelines |
 | **[🔧 Troubleshooting](TROUBLESHOOTING.md)** | Common issues, solutions, and FAQ for quick problem resolution |
 
-> 💡 **Quick Links**: [Installation](#-installation) • [Quick Start](#-quick-start) • [Configuration](CONFIGURATION.md) • [Usage Examples](USAGE.md) • [Troubleshooting](TROUBLESHOOTING.md)
+> 💡 **Quick Links**: [Installation](#-installation) • [Quick Start](#-quick-start) • [Configuration](CONFIGURATION.md) • [Usage Examples](USAGE.md) • [Testing](TESTING.md) • [Troubleshooting](TROUBLESHOOTING.md)
 
 ## ✨ Key Features
 
@@ -197,7 +198,8 @@ This bot is designed for educational and research purposes. When contributing:
 1. Follow the modular architecture patterns
 2. Add comprehensive logging for new features
 3. Update configuration documentation for new parameters
-4. Include tests for detection algorithms
+4. Include tests for detection algorithms (see [Testing Guide](TESTING.md))
+5. Ensure all tests pass: `python -m pytest`
 
 > 🔧 **Having issues? Check the [Troubleshooting Guide](TROUBLESHOOTING.md) for solutions to common problems.**
 
@@ -213,14 +215,15 @@ This bot is for **educational and research purposes only**. It is designed to de
 
 ## 📖 Documentation Navigation
 
-| **Getting Started** | **Configuration** | **Operations** | **Support** |
-|:-------------------|:------------------|:---------------|:------------|
-| [📦 Installation](#-installation) | [⚙️ Configuration Guide](CONFIGURATION.md) | [💻 Usage Examples](USAGE.md) | [🔧 Troubleshooting](TROUBLESHOOTING.md) |
-| [🚀 Quick Start](#-quick-start) | [🎛️ Tuning Guidelines](CONFIGURATION.md#-tuning-guidelines) | [🐳 Debug Mode](USAGE.md#-debug-and-development-usage) | [❓ FAQ](TROUBLESHOOTING.md#-frequently-asked-questions) |
-| [📁 Project Structure](#-project-structure) | [🔐 Environment Setup](CONFIGURATION.md#-environment-variables) | [📊 Performance Tips](USAGE.md#-performance-optimization) | [🚨 Emergency Procedures](TROUBLESHOOTING.md#-emergency-procedures) |
+| **Getting Started** | **Configuration** | **Operations** | **Development** | **Support** |
+|:-------------------|:------------------|:---------------|:----------------|:------------|
+| [📦 Installation](#-installation) | [⚙️ Configuration Guide](CONFIGURATION.md) | [💻 Usage Examples](USAGE.md) | [🧪 Testing Guide](TESTING.md) | [🔧 Troubleshooting](TROUBLESHOOTING.md) |
+| [🚀 Quick Start](#-quick-start) | [🎛️ Tuning Guidelines](CONFIGURATION.md#-tuning-guidelines) | [🐳 Debug Mode](USAGE.md#-debug-and-development-usage) | [🏗️ Test Architecture](TESTING.md#-test-architecture) | [❓ FAQ](TROUBLESHOOTING.md#-frequently-asked-questions) |
+| [📁 Project Structure](#-project-structure) | [🔐 Environment Setup](CONFIGURATION.md#-environment-variables) | [📊 Performance Tips](USAGE.md#-performance-optimization) | [🚀 Running Tests](TESTING.md#-running-tests) | [🚨 Emergency Procedures](TROUBLESHOOTING.md#-emergency-procedures) |
 
 ### Quick Reference
 - **First time setup**: [Installation](#-installation) → [Configuration](CONFIGURATION.md) → [Quick Start](#-quick-start)
 - **Customization**: [Configuration Guide](CONFIGURATION.md) → [Usage Examples](USAGE.md)
+- **Development**: [Testing Guide](TESTING.md) → [Writing Tests](TESTING.md#-writing-new-tests)
 - **Issues**: [Troubleshooting](TROUBLESHOOTING.md) → [FAQ](TROUBLESHOOTING.md#-frequently-asked-questions)
 - **Advanced usage**: [Usage Guide](USAGE.md) → [Performance Optimization](USAGE.md#-performance-optimization)

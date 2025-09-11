@@ -155,15 +155,29 @@ class WebSocketClient:
                 is_trade = True
                 if self.debug_mode:
                     logger.info(f"🔍 DETECTED TRADE BY EVENT_TYPE: {event_type}")
-            elif not msg_type and ('price' in data and 'size' in data and ('maker' in data or 'taker' in data)):
-                # Trade without explicit type but has trade fields
-                is_trade = True
-                if self.debug_mode:
-                    logger.info(f"🔍 DETECTED TRADE WITHOUT TYPE: {data}")
+            elif not msg_type:
+                # Check if trade fields are in top-level data
+                has_trade_fields = ('price' in data and 'size' in data and ('maker' in data or 'taker' in data))
+                # Check if trade fields are in nested data
+                has_nested_trade_fields = ('data' in data and isinstance(data['data'], dict) and 
+                                         'price' in data['data'] and 'size' in data['data'] and 
+                                         ('maker' in data['data'] or 'taker' in data['data']))
+                
+                if has_trade_fields or has_nested_trade_fields:
+                    # Trade without explicit type but has trade fields
+                    is_trade = True
+                    if self.debug_mode:
+                        logger.info(f"🔍 DETECTED TRADE WITHOUT TYPE: {data}")
             
             if is_trade:
                 # This is a trade event - process it
-                trade_data = self._normalize_trade_data(data)
+                # Handle nested data structure (e.g., {'type': 'trade', 'data': {...}})
+                if 'data' in data and isinstance(data['data'], dict):
+                    # Use nested data for normalization
+                    trade_data = self._normalize_trade_data(data['data'])
+                else:
+                    # Use flat data structure
+                    trade_data = self._normalize_trade_data(data)
                 
                 if trade_data:
                     self.trades_processed += 1

@@ -6,6 +6,7 @@ Identifies large orders and coordinated whale activity
 import pandas as pd
 from typing import Dict, List, Tuple
 import logging
+from .utils import TradeNormalizer, ThresholdValidator, create_consistent_early_return
 
 logger = logging.getLogger(__name__)
 
@@ -29,39 +30,36 @@ class WhaleDetector:
     def detect_whale_activity(self, trades: List[Dict]) -> Dict:
         """Detect large orders from single or coordinated wallets"""
         if not trades:
-            return {'anomaly': False, 'reason': 'No trades available'}
+            return create_consistent_early_return(
+                anomaly=False, 
+                reason='No trades available'
+            )
         
-        # Normalize trade data
-        normalized_trades = []
-        for trade in trades:
-            try:
-                normalized = {
-                    'price': float(trade.get('price', trade.get('feeRate', trade.get('outcome_price', 0)))),
-                    'size': float(trade.get('size', trade.get('amount', trade.get('shares', 1)))),
-                    'side': trade.get('side', trade.get('type', 'BUY')).upper(),
-                    'maker': trade.get('maker', trade.get('trader', trade.get('user', 'unknown')))
-                }
-                if normalized['price'] > 0:
-                    normalized_trades.append(normalized)
-            except (ValueError, TypeError):
-                continue
+        # Normalize trade data using utility (timestamps not required for whale detection)
+        normalized_trades = TradeNormalizer.normalize_trades(trades, require_timestamp=False)
         
         if not normalized_trades:
-            return {'anomaly': False, 'reason': 'No valid trades after normalization'}
+            return create_consistent_early_return(
+                anomaly=False, 
+                reason='No valid trades after normalization'
+            )
         
         df = pd.DataFrame(normalized_trades)
-        df['volume_usd'] = df['price'] * df['size']
+        # volume_usd already calculated in normalization
         
-        # Find whale trades
-        whale_trades = df[df['volume_usd'] > self.thresholds['whale_threshold_usd']]
+        # Find whale trades using threshold utility
+        whale_trades = df[df['volume_usd'] >= self.thresholds['whale_threshold_usd']]
         
         if len(whale_trades) == 0:
-            return {
-                'anomaly': False, 
-                'reason': f'No trades above ${self.thresholds["whale_threshold_usd"]} threshold',
-                'total_trades': len(df),
-                'largest_trade': df['volume_usd'].max() if len(df) > 0 else 0
-            }
+            return create_consistent_early_return(
+                anomaly=False,
+                reason=f'No trades above ${self.thresholds["whale_threshold_usd"]} threshold',
+                additional_fields={
+                    'whale_count': 0,
+                    'total_trades': len(df),
+                    'largest_trade': df['volume_usd'].max() if len(df) > 0 else 0
+                }
+            )
         
         # Analyze whale patterns
         analysis = self._analyze_whale_patterns(whale_trades, df)
@@ -114,10 +112,14 @@ class WhaleDetector:
         total_market_volume = all_trades['volume_usd'].sum()
         whale_market_share = total_whale_volume / max(total_market_volume, 1)
         
-        # Check for significant activity
+        # Check for significant activity using threshold validator
         significant_activity = (
-            direction_imbalance > self.thresholds['coordination_threshold'] and
-            len(top_whales) >= self.thresholds['min_whales_for_coordination']
+            ThresholdValidator.meets_threshold(
+                direction_imbalance, self.thresholds['coordination_threshold'], inclusive=False
+            ) and
+            ThresholdValidator.meets_threshold(
+                len(top_whales), self.thresholds['min_whales_for_coordination'], inclusive=True
+            )
         )
         
         return {
@@ -155,8 +157,10 @@ class WhaleDetector:
         
         # Check for timing clusters
         if 'timestamp' in whale_trades.columns:
-            whale_trades['timestamp'] = pd.to_datetime(whale_trades['timestamp'])
-            time_diff = whale_trades['timestamp'].diff().dt.total_seconds().fillna(0)
+            # Create a copy to avoid SettingWithCopyWarning
+            whale_trades_copy = whale_trades.copy()
+            whale_trades_copy['timestamp'] = pd.to_datetime(whale_trades_copy['timestamp'])
+            time_diff = whale_trades_copy['timestamp'].diff().dt.total_seconds().fillna(0)
             avg_time_gap = time_diff.mean()
             clustered_timing = (time_diff < 300).sum() / len(time_diff) > 0.5  # 50% within 5 minutes
         else:
@@ -165,7 +169,9 @@ class WhaleDetector:
         
         # Coordination indicators
         same_direction = len(whale_trades['side'].unique()) == 1  # All same direction
-        multiple_whales = whale_trades['maker'].nunique() >= self.thresholds['min_whales_for_coordination']
+        multiple_whales = ThresholdValidator.meets_threshold(
+            whale_trades['maker'].nunique(), self.thresholds['min_whales_for_coordination'], inclusive=True
+        )
         similar_sizes = size_variance < 0.5  # Low variance in trade sizes
         
         coordination_score = sum([
