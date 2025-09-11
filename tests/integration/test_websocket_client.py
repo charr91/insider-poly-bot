@@ -151,64 +151,34 @@ class TestWebSocketClientIntegration:
         client._on_message(Mock(), empty_list)
         trade_callback.assert_not_called()
         
-        # List with trade events
-        trade_list = json.dumps([
+        # List with order book events (WebSocket only processes order books now)
+        order_book_list = json.dumps([
             {
-                "type": "trade",
                 "market": "test_market",
-                "price": "0.65",
-                "size": "1500",
-                "side": "BUY",
-                "maker": "0xmaker",
-                "taker": "0xtaker"
+                "bids": [["0.65", "1500"]],
+                "asks": [["0.70", "1000"]]
             }
         ])
         
-        client._on_message(Mock(), trade_list)
-        trade_callback.assert_called_once()
+        client._on_message(Mock(), order_book_list)
+        # Should not call trade callback for order book data
+        trade_callback.assert_not_called()
+        assert client.order_books_received == 1
     
     def test_on_message_dict_processing(self, client, trade_callback):
         """Test processing of dictionary messages."""
-        trade_dict = json.dumps({
-            "type": "trade",
+        order_book_dict = json.dumps({
             "market": "test_market",
-            "price": "0.75",
-            "size": "2000",
-            "side": "SELL",
-            "maker": "0xmaker2",
-            "taker": "0xtaker2"
+            "bids": [["0.75", "2000"]],
+            "asks": [["0.80", "1500"]]
         })
         
-        client._on_message(Mock(), trade_dict)
-        trade_callback.assert_called_once()
+        client._on_message(Mock(), order_book_dict)
+        # Should not call trade callback for order book data
+        trade_callback.assert_not_called()
+        assert client.order_books_received == 1
     
-    def test_process_trade_event_type_detection(self, client, trade_callback):
-        """Test trade event type detection."""
-        trade_events = [
-            {"type": "trade", "market": "test1", "price": "0.5", "size": "1000", "maker": "0xa", "taker": "0xb"},
-            {"type": "TRADE", "market": "test2", "price": "0.6", "size": "1000", "maker": "0xc", "taker": "0xd"},
-            {"event_type": "fill", "market": "test3", "price": "0.7", "size": "1000", "maker": "0xe", "taker": "0xf"},
-            {"event_type": "EXECUTION", "market": "test4", "price": "0.8", "size": "1000", "maker": "0xg", "taker": "0xh"},
-        ]
-        
-        for event in trade_events:
-            client._process_trade_event(event)
-        
-        # Should detect all as trades
-        assert trade_callback.call_count == 4
     
-    def test_process_trade_event_implicit_detection(self, client, trade_callback):
-        """Test implicit trade detection without explicit type."""
-        implicit_trade = {
-            "market": "test_market",
-            "price": "0.55",
-            "size": "1200",
-            "maker": "0ximplicit_maker",
-            "taker": "0ximplicit_taker"
-        }
-        
-        client._process_trade_event(implicit_trade)
-        trade_callback.assert_called_once()
     
     def test_process_trade_event_subscription_messages(self, client, trade_callback, caplog):
         """Test handling of subscription messages."""
@@ -245,64 +215,8 @@ class TestWebSocketClientIntegration:
         # Should log errors
         assert "WebSocket error message" in caplog.text
     
-    def test_normalize_trade_data_valid(self, client):
-        """Test trade data normalization with valid data."""
-        trade_data = {
-            "market": "test_market_123",
-            "price": "0.75",
-            "size": "2500",
-            "side": "buy",
-            "maker": "0xmaker123",
-            "taker": "0xtaker456",
-            "timestamp": 1640995200,
-            "txHash": "0xtx123"
-        }
-        
-        normalized = client._normalize_trade_data(trade_data)
-        
-        assert normalized is not None
-        assert normalized["market"] == "test_market_123"
-        assert normalized["price"] == 0.75
-        assert normalized["size"] == 2500.0
-        assert normalized["side"] == "BUY"
-        assert normalized["maker"] == "0xmaker123"
-        assert normalized["taker"] == "0xtaker456"
-        assert normalized["timestamp"] == 1640995200
-        assert normalized["tx_hash"] == "0xtx123"
-        assert normalized["source"] == "websocket"
     
-    def test_normalize_trade_data_invalid(self, client, caplog):
-        """Test trade data normalization with invalid data."""
-        invalid_data_sets = [
-            {"market": "", "price": "0.5", "size": "1000"},  # Empty market
-            {"market": "test", "price": "0", "size": "1000"},  # Zero price
-            {"market": "test", "price": "0.5", "size": "0"},  # Zero size
-            {"market": "test", "price": "invalid", "size": "1000"},  # Invalid price
-            {"market": "test", "price": "0.5", "size": "invalid"},  # Invalid size
-        ]
-        
-        with caplog.at_level("WARNING"):
-            for data in invalid_data_sets:
-                result = client._normalize_trade_data(data)
-                assert result is None
-        
-        assert "Invalid trade data" in caplog.text or "Error normalizing" in caplog.text
     
-    def test_normalize_trade_data_missing_timestamp(self, client):
-        """Test trade data normalization with missing timestamp."""
-        trade_data = {
-            "market": "test_market",
-            "price": "0.5",
-            "size": "1000",
-            "side": "BUY"
-        }
-        
-        normalized = client._normalize_trade_data(trade_data)
-        
-        assert normalized is not None
-        assert "timestamp" in normalized
-        # Should add current timestamp
-        assert isinstance(normalized["timestamp"], (int, float))
     
     def test_subscribe_to_markets(self, client, mock_websocket):
         """Test market subscription process."""
@@ -312,8 +226,8 @@ class TestWebSocketClientIntegration:
         with patch('time.sleep'):  # Mock sleep to speed up test
             client._subscribe_to_markets()
         
-        # Should send multiple subscription types
-        assert mock_websocket.send.call_count == 5
+        # Should send 1 market subscription only
+        assert mock_websocket.send.call_count == 1
         
         # Verify subscription messages
         sent_messages = [call[0][0] for call in mock_websocket.send.call_args_list]
@@ -493,7 +407,6 @@ class TestWebSocketClientIntegration:
     def test_get_activity_stats(self, client):
         """Test activity statistics retrieval."""
         client.messages_received = 100
-        client.trades_processed = 5
         client.order_books_received = 95
         client.is_connected = True
         client.reconnect_attempts = 2
@@ -502,7 +415,6 @@ class TestWebSocketClientIntegration:
         
         expected = {
             'messages_received': 100,
-            'trades_processed': 5,
             'order_books_received': 95,
             'is_connected': True,
             'reconnect_attempts': 2
@@ -514,7 +426,6 @@ class TestWebSocketClientIntegration:
         client.show_activity = True
         client.activity_report_interval = 1  # 1 second for testing
         client.messages_received = 50
-        client.trades_processed = 3
         client.order_books_received = 47
         
         # Simulate time passage
@@ -528,7 +439,6 @@ class TestWebSocketClientIntegration:
         
         # Should reset counters
         assert client.messages_received == 0
-        assert client.trades_processed == 0
         assert client.order_books_received == 0
     
     def test_report_activity_not_needed(self, client):
@@ -546,91 +456,83 @@ class TestWebSocketClientIntegration:
         mock_print.assert_not_called()
     
     def test_message_count_tracking(self, client, trade_callback):
-        """Test message count tracking and debug limits."""
+        """Test order book message processing without debug spam."""
         client.debug_mode = True
         
-        # Send more than debug limit messages
+        # Send order book messages
         for i in range(15):
-            trade_event = {
-                "type": "trade",
+            order_book_event = {
                 "market": f"test_market_{i}",
-                "price": "0.5",
-                "size": "1000",
-                "maker": f"0xmaker{i}",
-                "taker": f"0xtaker{i}"
+                "bids": [["0.5", "1000"]],
+                "asks": [["0.6", "800"]]
             }
-            client._process_trade_event(trade_event)
+            client._process_trade_event(order_book_event)
         
-        # Should have debug message count attribute
-        assert hasattr(client, '_debug_message_count')
-        assert client._debug_message_count == 15
+        # Should have processed all order books without debug spam
+        assert client.order_books_received == 15
         
-        # Should process all trades
-        assert trade_callback.call_count == 15
+        # Should process all order books, no trade callbacks
+        assert trade_callback.call_count == 0
+        assert client.order_books_received == 15
     
     def test_websocket_fixtures_integration(self, client, trade_callback):
         """Test integration with WebSocket fixtures."""
         fixtures = WebSocketFixtures()
         
-        # Test volume spike sequence
+        # Test volume spike sequence - WebSocket now processes as order books
         spike_messages = fixtures.volume_spike_sequence()
         for msg in spike_messages:
             message_json = json.dumps(msg)
             client._on_message(Mock(), message_json)
         
-        # Should process all trade messages
-        expected_trades = len([msg for msg in spike_messages if msg.get("type") == "trade"])
-        assert trade_callback.call_count == expected_trades
+        # Should process messages as order books, no trade callbacks
+        assert trade_callback.call_count == 0
+        # Order books should be processed
+        assert client.order_books_received > 0
     
     @patch('data_sources.websocket_client.websocket.WebSocketApp')
     def test_concurrent_message_processing(self, mock_websocket_app, client, trade_callback):
         """Test concurrent message processing."""
         import threading
         
-        # Create multiple trade messages
-        trade_messages = []
+        # Create multiple order book messages
+        order_book_messages = []
         for i in range(10):
-            trade_messages.append(json.dumps({
-                "type": "trade",
+            order_book_messages.append(json.dumps({
                 "market": f"market_{i}",
-                "price": f"0.{50 + i}",
-                "size": "1000",
-                "maker": f"0xmaker{i}",
-                "taker": f"0xtaker{i}"
+                "bids": [[f"0.{50 + i}", "1000"]],
+                "asks": [[f"0.{60 + i}", "800"]]
             }))
         
         # Process messages concurrently
         def process_message(message):
             client._on_message(Mock(), message)
         
-        threads = [threading.Thread(target=process_message, args=(msg,)) for msg in trade_messages]
+        threads = [threading.Thread(target=process_message, args=(msg,)) for msg in order_book_messages]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
         
-        # Should process all trades
-        assert trade_callback.call_count == 10
+        # Should process all order books, no trade callbacks
+        assert trade_callback.call_count == 0
+        assert client.order_books_received == 10
     
     def test_memory_efficiency_large_messages(self, client, trade_callback):
         """Test memory efficiency with large message processing."""
-        # Create large trade message
-        large_trade = {
-            "type": "trade",
+        # Create large order book message
+        large_order_book = {
             "market": "large_test_market",
-            "price": "0.75",
-            "size": "50000",
-            "maker": "0x" + "a" * 38,  # Long wallet address
-            "taker": "0x" + "b" * 38,
+            "bids": [["0.75", "50000"]] * 100,  # Large bid array
+            "asks": [["0.80", "25000"]] * 100,  # Large ask array
             "additional_data": "x" * 1000  # Large additional field
         }
         
-        message = json.dumps(large_trade)
+        message = json.dumps(large_order_book)
         client._on_message(Mock(), message)
         
-        # Should handle large messages
-        trade_callback.assert_called_once()
+        # Should handle large messages without calling trade callback
+        trade_callback.assert_not_called()
         
-        # Verify normalized data doesn't include extra fields
-        called_trade = trade_callback.call_args[0][0]
-        assert "additional_data" not in called_trade
+        # Should process as order book
+        assert client.order_books_received == 1

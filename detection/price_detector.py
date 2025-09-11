@@ -7,27 +7,25 @@ import pandas as pd
 from typing import Dict, List, Tuple
 from datetime import datetime, timedelta, timezone
 import logging
+from .base_detector import DetectorBase
 from .utils import TradeNormalizer, ThresholdValidator, create_consistent_early_return
 
 logger = logging.getLogger(__name__)
 
-class PriceDetector:
+class PriceDetector(DetectorBase):
     """Detects unusual price movements and volatility patterns"""
     
-    def __init__(self, config: Dict = None):
-        self.config = config or {}
-        self.thresholds = {
-            'rapid_movement_pct': 15,  # 15% price move threshold
-            'price_movement_std': 2.5,  # 2.5 standard deviations
-            'volatility_spike_multiplier': 3.0,  # 3x normal volatility
-            'momentum_threshold': 0.8  # Momentum consistency threshold
-        }
-        
-        # Update thresholds from config
-        if config and 'detection' in config:
-            detection_config = config['detection']
-            if 'price_thresholds' in detection_config:
-                self.thresholds.update(detection_config['price_thresholds'])
+    def __init__(self, config: Dict):
+        # Initialize base detector
+        super().__init__(config, 'price')
+    
+    def _load_detector_config(self):
+        """Load price-specific configuration from config dict"""
+        # Validate and load price thresholds from config (no hardcoded fallbacks)
+        self.thresholds = self._validate_config_section(
+            'price_thresholds', 
+            ['rapid_movement_pct', 'price_movement_std', 'volatility_spike_multiplier', 'momentum_threshold']
+        )
     
     def _create_price_early_return(self, reason: str, window_minutes: int) -> Dict:
         """Create consistent early return structure for price detection"""

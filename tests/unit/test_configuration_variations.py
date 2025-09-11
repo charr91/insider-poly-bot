@@ -78,7 +78,15 @@ class TestConfigurationVariations:
     @pytest.mark.parametrize("window_hours", [1, 2, 4, 6, 12, 24])
     def test_volume_detector_time_window_variations(self, window_hours, sample_trades):
         """Test volume detector with different time window configurations."""
-        detector = VolumeDetector()
+        config = {
+            'detection': {
+                'volume_thresholds': {
+                    'volume_spike_multiplier': 3.0,
+                    'z_score_threshold': 3.0
+                }
+            }
+        }
+        detector = VolumeDetector(config)
         
         # Test recent volume calculation with different windows
         volume = detector.get_recent_volume(sample_trades, window_hours)
@@ -139,7 +147,16 @@ class TestConfigurationVariations:
             }
             trades.append(trade)
         
-        detector = WhaleDetector()
+        config = {
+            'detection': {
+                'whale_thresholds': {
+                    'whale_threshold_usd': 10000,
+                    'coordination_threshold': 0.7,
+                    'min_whales_for_coordination': 3
+                }
+            }
+        }
+        detector = WhaleDetector(config)
         result = detector.detect_whale_activity(trades)
         
         # Should handle different field names
@@ -162,6 +179,7 @@ class TestConfigurationVariations:
             'detection': {
                 'price_thresholds': {
                     'rapid_movement_pct': rapid_pct,
+                    'price_movement_std': 2.5,  # Default value
                     'volatility_spike_multiplier': volatility_mult,
                     'momentum_threshold': momentum_thresh
                 }
@@ -189,7 +207,17 @@ class TestConfigurationVariations:
     def test_price_detector_window_variations(self, window_minutes, mock_data_generator):
         """Test price detector with different time window configurations."""
         trades = mock_data_generator.generate_pump_and_dump_pattern()
-        detector = PriceDetector()
+        config = {
+            'detection': {
+                'price_thresholds': {
+                    'rapid_movement_pct': 15,
+                    'price_movement_std': 2.5,
+                    'volatility_spike_multiplier': 3.0,
+                    'momentum_threshold': 0.8
+                }
+            }
+        }
+        detector = PriceDetector(config)
         
         result = detector.detect_price_movement(trades, window_minutes=window_minutes)
         
@@ -214,7 +242,8 @@ class TestConfigurationVariations:
                 'coordination_thresholds': {
                     'min_coordinated_wallets': min_wallets,
                     'coordination_time_window': time_window,
-                    'directional_bias_threshold': bias_threshold
+                    'directional_bias_threshold': bias_threshold,
+                    'burst_intensity_threshold': 3.0  # Default value
                 }
             }
         }
@@ -243,7 +272,17 @@ class TestConfigurationVariations:
         self, coordination_windows, coordinated_trades
     ):
         """Test coordination detector with different time window sets."""
-        detector = CoordinationDetector()
+        config = {
+            'detection': {
+                'coordination_thresholds': {
+                    'min_coordinated_wallets': 5,
+                    'coordination_time_window': 30,
+                    'directional_bias_threshold': 0.8,
+                    'burst_intensity_threshold': 3.0
+                }
+            }
+        }
+        detector = CoordinationDetector(config)
         
         # Mock the windows to test different configurations
         with patch.object(detector, '_analyze_coordination_windows') as mock_analyze:
@@ -267,14 +306,39 @@ class TestConfigurationVariations:
         self, detector_class, config_key, threshold_key, test_values
     ):
         """Test that all detectors handle configuration changes robustly."""
+        # Base configurations with all required fields
+        base_configs = {
+            'volume_thresholds': {
+                'volume_spike_multiplier': 3.0,
+                'z_score_threshold': 3.0
+            },
+            'whale_thresholds': {
+                'whale_threshold_usd': 10000,
+                'coordination_threshold': 0.7,
+                'min_whales_for_coordination': 3
+            },
+            'price_thresholds': {
+                'rapid_movement_pct': 15,
+                'price_movement_std': 2.5,
+                'volatility_spike_multiplier': 3.0,
+                'momentum_threshold': 0.8
+            },
+            'coordination_thresholds': {
+                'min_coordinated_wallets': 5,
+                'coordination_time_window': 30,
+                'directional_bias_threshold': 0.8,
+                'burst_intensity_threshold': 3.0
+            }
+        }
+        
         for value in test_values:
             config = {
                 'detection': {
-                    config_key: {
-                        threshold_key: value
-                    }
+                    config_key: base_configs[config_key].copy()
                 }
             }
+            # Override the specific field being tested
+            config['detection'][config_key][threshold_key] = value
             
             # Should initialize without error
             detector = detector_class(config)
@@ -287,14 +351,13 @@ class TestConfigurationVariations:
         {'other_section': {'value': 123}},  # Unrelated config
     ])
     def test_detector_invalid_configuration_handling(self, config_scenario):
-        """Test that detectors handle invalid or missing configurations gracefully."""
+        """Test that detectors raise appropriate errors with invalid configurations."""
         detectors = [VolumeDetector, WhaleDetector, PriceDetector, CoordinationDetector]
         
         for detector_class in detectors:
-            # Should not raise exception with invalid config
-            detector = detector_class(config_scenario)
-            assert hasattr(detector, 'thresholds')
-            assert isinstance(detector.thresholds, dict)
+            # Should raise ValueError with invalid config - fail fast approach
+            with pytest.raises(ValueError):
+                detector = detector_class(config_scenario)
     
     # Market Condition Simulation Tests
     @pytest.mark.parametrize("market_scenario", [
@@ -332,10 +395,21 @@ class TestConfigurationVariations:
                     'z_score_threshold': scenario['price_volatility']
                 },
                 'whale_thresholds': {
-                    'whale_threshold_usd': scenario['whale_threshold']
+                    'whale_threshold_usd': scenario['whale_threshold'],
+                    'coordination_threshold': 0.7,
+                    'min_whales_for_coordination': 3
                 },
                 'price_thresholds': {
-                    'volatility_spike_multiplier': scenario['price_volatility']
+                    'rapid_movement_pct': 15,
+                    'price_movement_std': 2.5,
+                    'volatility_spike_multiplier': scenario['price_volatility'],
+                    'momentum_threshold': 0.8
+                },
+                'coordination_thresholds': {
+                    'min_coordinated_wallets': 5,
+                    'coordination_time_window': 30,
+                    'directional_bias_threshold': 0.8,
+                    'burst_intensity_threshold': 3.0
                 }
             }
         }
@@ -391,7 +465,27 @@ class TestConfigurationVariations:
         if config_complexity == "simple":
             config = {
                 'detection': {
-                    'volume_thresholds': {'volume_spike_multiplier': 3.0}
+                    'volume_thresholds': {
+                        'volume_spike_multiplier': 3.0,
+                        'z_score_threshold': 3.0
+                    },
+                    'whale_thresholds': {
+                        'whale_threshold_usd': 10000,
+                        'coordination_threshold': 0.7,
+                        'min_whales_for_coordination': 3
+                    },
+                    'price_thresholds': {
+                        'rapid_movement_pct': 15,
+                        'price_movement_std': 2.5,
+                        'volatility_spike_multiplier': 3.0,
+                        'momentum_threshold': 0.8
+                    },
+                    'coordination_thresholds': {
+                        'min_coordinated_wallets': 5,
+                        'coordination_time_window': 30,
+                        'directional_bias_threshold': 0.8,
+                        'burst_intensity_threshold': 3.0
+                    }
                 }
             }
         else:  # complex
@@ -408,8 +502,15 @@ class TestConfigurationVariations:
                     },
                     'price_thresholds': {
                         'rapid_movement_pct': 15,
+                        'price_movement_std': 2.5,
                         'volatility_spike_multiplier': 3.0,
                         'momentum_threshold': 0.8
+                    },
+                    'coordination_thresholds': {
+                        'min_coordinated_wallets': 5,
+                        'coordination_time_window': 30,
+                        'directional_bias_threshold': 0.8,
+                        'burst_intensity_threshold': 3.0
                     }
                 }
             }
@@ -439,20 +540,14 @@ class TestConfigurationVariations:
         {'detection': {'price_thresholds': {'rapid_movement_pct': None}}},      # None value
     ])
     def test_invalid_configuration_values(self, invalid_config):
-        """Test handling of invalid configuration values."""
-        # Detectors should handle invalid values gracefully
-        detectors = [
-            (VolumeDetector, 'volume_spike_multiplier'),
-            (WhaleDetector, 'whale_threshold_usd'),
-            (PriceDetector, 'rapid_movement_pct'),
-        ]
+        """Test that detectors raise errors with invalid or incomplete configuration values."""
+        # Detectors should raise ValueError with invalid/incomplete configs
+        detectors = [VolumeDetector, WhaleDetector, PriceDetector, CoordinationDetector]
         
-        for detector_class, threshold_key in detectors:
-            if threshold_key in str(invalid_config):
+        for detector_class in detectors:
+            # Should raise ValueError with invalid/incomplete config - fail fast approach
+            with pytest.raises(ValueError):
                 detector = detector_class(invalid_config)
-                # Should either use default value or handle invalid value gracefully
-                assert hasattr(detector, 'thresholds')
-                assert threshold_key in detector.thresholds
     
     # Configuration Boundary Tests
     @pytest.mark.parametrize("boundary_config", [
@@ -490,10 +585,27 @@ class TestConfigurationVariations:
         """Test that configuration structure is consistent across all detectors."""
         config = {
             'detection': {
-                'volume_thresholds': {'volume_spike_multiplier': 3.0},
-                'whale_thresholds': {'whale_threshold_usd': 10000},
-                'price_thresholds': {'rapid_movement_pct': 15},
-                'coordination_thresholds': {'min_coordinated_wallets': 5}
+                'volume_thresholds': {
+                    'volume_spike_multiplier': 3.0,
+                    'z_score_threshold': 3.0
+                },
+                'whale_thresholds': {
+                    'whale_threshold_usd': 10000,
+                    'coordination_threshold': 0.7,
+                    'min_whales_for_coordination': 3
+                },
+                'price_thresholds': {
+                    'rapid_movement_pct': 15,
+                    'price_movement_std': 2.5,
+                    'volatility_spike_multiplier': 3.0,
+                    'momentum_threshold': 0.8
+                },
+                'coordination_thresholds': {
+                    'min_coordinated_wallets': 5,
+                    'coordination_time_window': 30,
+                    'directional_bias_threshold': 0.8,
+                    'burst_intensity_threshold': 3.0
+                }
             }
         }
         

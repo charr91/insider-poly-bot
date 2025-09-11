@@ -8,6 +8,7 @@ import numpy as np
 
 from detection.whale_detector import WhaleDetector
 from tests.fixtures.data_generators import MockDataGenerator
+from tests.test_utils import create_test_config, setup_detector_for_testing
 
 
 class TestWhaleDetector:
@@ -16,16 +17,9 @@ class TestWhaleDetector:
     @pytest.fixture
     def detector(self):
         """Create WhaleDetector instance for testing."""
-        config = {
-            'detection': {
-                'whale_thresholds': {
-                    'whale_threshold_usd': 15000,
-                    'coordination_threshold': 0.8,
-                    'min_whales_for_coordination': 3
-                }
-            }
-        }
-        return WhaleDetector(config)
+        config = create_test_config()
+        detector = WhaleDetector(config)
+        return setup_detector_for_testing(detector)
     
     @pytest.fixture
     def normal_trades(self):
@@ -50,13 +44,6 @@ class TestWhaleDetector:
             wallet_count=5,
             coordination_window=300
         )
-    
-    def test_init_default_config(self):
-        """Test WhaleDetector initialization with default config."""
-        detector = WhaleDetector()
-        assert detector.thresholds['whale_threshold_usd'] == 10000
-        assert detector.thresholds['coordination_threshold'] == 0.7
-        assert detector.thresholds['min_whales_for_coordination'] == 3
     
     def test_init_custom_config(self):
         """Test WhaleDetector initialization with custom config."""
@@ -96,7 +83,7 @@ class TestWhaleDetector:
         result = detector.detect_whale_activity(normal_trades)
         
         assert not result['anomaly']
-        assert '$15000 threshold' in result['reason']
+        assert '$10000 threshold' in result['reason']
         assert result['total_trades'] > 0
         assert result['largest_trade'] > 0
     

@@ -1,6 +1,6 @@
 """
 Polymarket WebSocket Client
-Real-time trade stream for immediate detection
+Real-time order book updates for market monitoring
 """
 
 import websocket
@@ -18,11 +18,11 @@ init(autoreset=True)
 logger = logging.getLogger(__name__)
 
 class WebSocketClient:
-    """WebSocket client for real-time Polymarket trade data"""
+    """WebSocket client for real-time Polymarket order book data"""
     
     def __init__(self, market_ids: List[str], on_trade_callback: Callable[[Dict], None], debug_config: Dict = None):
         self.market_ids = market_ids  # These are actually token IDs for WebSocket
-        self.on_trade_callback = on_trade_callback
+        self.on_trade_callback = on_trade_callback  # Keep for compatibility, not used for order books
         self.ws_url = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
         self.ws = None
         self.is_connected = False
@@ -39,7 +39,6 @@ class WebSocketClient:
         
         # Activity tracking
         self.messages_received = 0
-        self.trades_processed = 0
         self.order_books_received = 0
         self.last_activity_report = datetime.now(timezone.utc)
         self.activity_report_interval = self.debug_config.get('activity_report_interval', 300)  # 5 minutes
@@ -129,74 +128,8 @@ class WebSocketClient:
         try:
             msg_type = data.get('type', data.get('event', ''))
             
-            # DEBUG: Log first few messages to see what we're getting
-            if hasattr(self, '_debug_message_count'):
-                self._debug_message_count += 1
-            else:
-                self._debug_message_count = 1
-                
-            if self._debug_message_count <= 10 and self.debug_mode:
-                logger.info(f"🔍 DEBUG MESSAGE #{self._debug_message_count}: type='{msg_type}', event_type='{data.get('event_type', 'N/A')}', keys={list(data.keys())[:10]}")
-                # Look for any trade-like fields
-                trade_fields = ['price', 'size', 'maker', 'taker', 'side', 'amount', 'volume', 'quantity']
-                found_fields = [f for f in trade_fields if f in data]
-                if found_fields:
-                    logger.info(f"🔍 POTENTIAL TRADE FIELDS: {found_fields}")
-                    logger.info(f"🔍 SAMPLE DATA: {dict((k, v) for k, v in data.items() if k in found_fields)}")
-            
-            # Check for trade events - try multiple approaches
-            is_trade = False
-            event_type = data.get('event_type', '')
-            
-            if msg_type in ['trade', 'TRADE']:
-                is_trade = True
-            elif event_type in ['trade', 'TRADE', 'fill', 'FILL', 'execution', 'EXECUTION']:
-                # Trade identified by event_type field
-                is_trade = True
-                if self.debug_mode:
-                    logger.info(f"🔍 DETECTED TRADE BY EVENT_TYPE: {event_type}")
-            elif not msg_type:
-                # Check if trade fields are in top-level data
-                has_trade_fields = ('price' in data and 'size' in data and ('maker' in data or 'taker' in data))
-                # Check if trade fields are in nested data
-                has_nested_trade_fields = ('data' in data and isinstance(data['data'], dict) and 
-                                         'price' in data['data'] and 'size' in data['data'] and 
-                                         ('maker' in data['data'] or 'taker' in data['data']))
-                
-                if has_trade_fields or has_nested_trade_fields:
-                    # Trade without explicit type but has trade fields
-                    is_trade = True
-                    if self.debug_mode:
-                        logger.info(f"🔍 DETECTED TRADE WITHOUT TYPE: {data}")
-            
-            if is_trade:
-                # This is a trade event - process it
-                # Handle nested data structure (e.g., {'type': 'trade', 'data': {...}})
-                if 'data' in data and isinstance(data['data'], dict):
-                    # Use nested data for normalization
-                    trade_data = self._normalize_trade_data(data['data'])
-                else:
-                    # Use flat data structure
-                    trade_data = self._normalize_trade_data(data)
-                
-                if trade_data:
-                    self.trades_processed += 1
-                    
-                    # Add timestamp if not present
-                    if 'timestamp' not in trade_data:
-                        trade_data['timestamp'] = datetime.now().timestamp()
-                    
-                    # Call the trade callback
-                    self.on_trade_callback(trade_data)
-                    
-                    if self.show_activity or self.debug_mode:
-                        side_color = Fore.GREEN if trade_data.get('side') == 'BUY' else Fore.RED
-                        print(f"{Fore.YELLOW}🚨 {Style.BRIGHT}TRADE DETECTED #{self.trades_processed}{Style.RESET_ALL}")
-                        print(f"   {Fore.CYAN}Size:{Style.RESET_ALL} {Fore.GREEN}${trade_data.get('size', 0):.2f}{Style.RESET_ALL} @ {Fore.WHITE}{trade_data.get('price', 0):.3f}{Style.RESET_ALL} {side_color}({trade_data.get('side', 'UNK')}){Style.RESET_ALL}")
-                    else:
-                        logger.debug(f"📈 Processed trade: {trade_data.get('size', 0)} @ {trade_data.get('price', 0)}")
-                    
-            elif msg_type in ['subscribed', 'SUBSCRIBED', 'subscription_success']:
+            # Handle subscription confirmations
+            if msg_type in ['subscribed', 'SUBSCRIBED', 'subscription_success']:
                 logger.info(f"✅ Subscribed successfully: {data}")
                 
             elif msg_type in ['error', 'ERROR']:
@@ -220,11 +153,10 @@ class WebSocketClient:
         if time_since_last_report >= self.activity_report_interval:
             if self.show_activity:
                 print(f"📊 WebSocket Activity: {self.messages_received} messages, "
-                      f"{self.trades_processed} trades, {self.order_books_received} order books")
+                      f"{self.order_books_received} order books")
             
             # Reset counters for next period and update stats tracking
             self.messages_received = 0
-            self.trades_processed = 0  
             self.order_books_received = 0
             self.last_activity_report = now
     
@@ -232,7 +164,6 @@ class WebSocketClient:
         """Get current activity statistics"""
         return {
             'messages_received': self.messages_received,
-            'trades_processed': self.trades_processed,
             'order_books_received': self.order_books_received,
             'is_connected': self.is_connected,
             'reconnect_attempts': self.reconnect_attempts
@@ -257,60 +188,26 @@ class WebSocketClient:
         if not self.ws or not self.market_ids:
             return
             
-        # Try multiple subscription approaches to get trades
+        # Subscribe to market data (order books)
         subscriptions = [
-            # Market data (working)
+            # Market data subscription
             {"type": "MARKET", "assets_ids": self.market_ids},
-            
-            # Try different trade subscription formats
-            {"type": "TRADES", "assets_ids": self.market_ids},
-            {"type": "FILL", "assets_ids": self.market_ids}, 
-            {"type": "TRADE", "assets_ids": self.market_ids},
-            {"type": "EXECUTION", "assets_ids": self.market_ids},
         ]
         
         try:
-            # Send all subscription types
-            for i, sub in enumerate(subscriptions):
-                sub_json = json.dumps(sub)
-                sub_type = sub["type"]
-                logger.info(f"📤 Sending {sub_type} subscription for {len(self.market_ids)} tokens")
-                if self.debug_mode:
-                    logger.debug(f"📤 Subscription {i+1}: {sub_json[:200]}...")
-                self.ws.send(sub_json)
-                time.sleep(0.1)  # Small delay between subscriptions
+            # Send market data subscription only (order books)
+            market_sub = subscriptions[0]  # MARKET subscription
+            sub_json = json.dumps(market_sub)
+            logger.info(f"📤 Sending MARKET subscription for {len(self.market_ids)} tokens")
+            if self.debug_mode:
+                logger.debug(f"📤 Subscription: {sub_json[:200]}...")
+            self.ws.send(sub_json)
             
-            logger.info(f"✅ Sent {len(subscriptions)} subscription types for {len(self.market_ids)} tokens")
+            logger.info(f"✅ Sent MARKET subscription for {len(self.market_ids)} tokens")
             
         except Exception as e:
             logger.error(f"❌ Failed to subscribe to markets: {e}")
     
-    def _normalize_trade_data(self, data: Dict) -> Dict:
-        """Normalize WebSocket trade data to standard format"""
-        try:
-            # Extract trade information from WebSocket message
-            normalized = {
-                'market': data.get('market'),
-                'price': float(data.get('price', 0)),
-                'size': float(data.get('size', 0)),
-                'side': data.get('side', '').upper(),
-                'maker': data.get('maker'),
-                'taker': data.get('taker'),
-                'timestamp': data.get('timestamp', datetime.now().timestamp()),
-                'tx_hash': data.get('txHash') or data.get('transaction_hash'),
-                'source': 'websocket'
-            }
-            
-            # Validate required fields
-            if not normalized['market'] or normalized['price'] <= 0 or normalized['size'] <= 0:
-                logger.warning(f"Invalid trade data received: {data}")
-                return None
-                
-            return normalized
-            
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Error normalizing trade data: {e}")
-            return None
     
     def _start_heartbeat(self):
         """Start heartbeat to keep connection alive"""

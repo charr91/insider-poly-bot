@@ -9,6 +9,7 @@ import numpy as np
 
 from detection.coordination_detector import CoordinationDetector
 from tests.fixtures.data_generators import MockDataGenerator
+from tests.test_utils import create_test_config, setup_detector_for_testing
 
 
 class TestCoordinationDetector:
@@ -17,19 +18,9 @@ class TestCoordinationDetector:
     @pytest.fixture
     def detector(self):
         """Create CoordinationDetector instance for testing."""
-        config = {
-            'detection': {
-                'coordination_thresholds': {
-                    'min_coordinated_wallets': 4,
-                    'coordination_time_window': 30,
-                    'directional_bias_threshold': 0.75,
-                    'new_wallet_threshold': 5,
-                    'burst_intensity_threshold': 3.0,
-                    'similar_size_variance': 0.3
-                }
-            }
-        }
-        return CoordinationDetector(config)
+        config = create_test_config()
+        detector = CoordinationDetector(config)
+        return setup_detector_for_testing(detector)
     
     @pytest.fixture
     def normal_trades(self):
@@ -76,20 +67,15 @@ class TestCoordinationDetector:
         
         return wash_trades
     
-    def test_init_default_config(self):
-        """Test CoordinationDetector initialization with default config."""
-        detector = CoordinationDetector()
-        assert detector.thresholds['min_coordinated_wallets'] == 5
-        assert detector.thresholds['coordination_time_window'] == 30
-        assert detector.thresholds['directional_bias_threshold'] == 0.8
-    
     def test_init_custom_config(self):
         """Test CoordinationDetector initialization with custom config."""
         config = {
             'detection': {
                 'coordination_thresholds': {
                     'min_coordinated_wallets': 10,
-                    'directional_bias_threshold': 0.9
+                    'coordination_time_window': 30,
+                    'directional_bias_threshold': 0.9,
+                    'burst_intensity_threshold': 3.0
                 }
             }
         }

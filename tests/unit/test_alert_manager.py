@@ -71,12 +71,14 @@ class TestAlertManagerInit:
             assert am.discord_webhook == "test_webhook"
     
     def test_severity_level_mapping(self, mock_settings):
-        """Test severity level mapping"""
+        """Test severity level mapping using AlertSeverity enum"""
+        from alerts.alert_manager import AlertSeverity
         am = AlertManager(mock_settings)
-        assert am.severity_levels['LOW'] == 1
-        assert am.severity_levels['MEDIUM'] == 2
-        assert am.severity_levels['HIGH'] == 3
-        assert am.severity_levels['CRITICAL'] == 4
+        # Test enum-based severity levels
+        assert AlertSeverity.get_level('LOW') == 1
+        assert AlertSeverity.get_level('MEDIUM') == 2
+        assert AlertSeverity.get_level('HIGH') == 3
+        assert AlertSeverity.get_level('CRITICAL') == 4
 
 
 class TestAlertFiltering:
@@ -121,7 +123,7 @@ class TestAlertFiltering:
         am = AlertManager(mock_settings)
         
         # Clear alert history to prevent rate limiting interference
-        am.alert_history = []
+        am.storage.alert_history = []
         
         with patch.object(am, '_send_discord_alert', new_callable=AsyncMock) as mock_discord:
             # MEDIUM alert should not go to Discord with HIGH threshold
@@ -129,7 +131,7 @@ class TestAlertFiltering:
             mock_discord.assert_not_called()
             
             # Clear history again between tests to avoid rate limiting
-            am.alert_history = []
+            am.storage.alert_history = []
             
             # HIGH alert should go to Discord
             high_alert = sample_alert.copy()
@@ -233,23 +235,22 @@ class TestAlertStatistics:
         """Test alert statistics calculation"""
         am = AlertManager(mock_settings)
         
-        # Add some mock alert history
-        am.alert_history = [
-            {
-                'timestamp': datetime.now(),
-                'market_id': 'test-1',
-                'alert_type': 'VOLUME_SPIKE',
-                'severity': 'HIGH'
-            },
-            {
-                'timestamp': datetime.now(),
-                'market_id': 'test-2',
-                'alert_type': 'WHALE_ACTIVITY',
-                'severity': 'MEDIUM'
-            }
-        ]
+        # Add some mock alert history using storage interface
+        am.storage.save_alert({
+            'timestamp': datetime.now(),
+            'market_id': 'test-1',
+            'alert_type': 'VOLUME_SPIKE',
+            'severity': 'HIGH'
+        })
+        am.storage.save_alert({
+            'timestamp': datetime.now(),
+            'market_id': 'test-2',
+            'alert_type': 'WHALE_ACTIVITY',
+            'severity': 'MEDIUM'
+        })
         
         stats = am.get_alert_stats()
         assert stats['total_alerts_24h'] == 2
         assert 'HIGH' in stats['by_severity']
-        assert 'VOLUME_SPIKE' in stats['by_type']
+        # by_type field no longer exists
+        assert 'by_type' not in stats

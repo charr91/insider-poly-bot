@@ -6,26 +6,25 @@ Identifies large orders and coordinated whale activity
 import pandas as pd
 from typing import Dict, List, Tuple
 import logging
+from .base_detector import DetectorBase
 from .utils import TradeNormalizer, ThresholdValidator, create_consistent_early_return
 
 logger = logging.getLogger(__name__)
 
-class WhaleDetector:
+class WhaleDetector(DetectorBase):
     """Detects whale trading activity and coordination patterns"""
     
-    def __init__(self, config: Dict = None):
-        self.config = config or {}
-        self.thresholds = {
-            'whale_threshold_usd': 10000,  # Orders >$10k
-            'coordination_threshold': 0.7,  # 70% directional imbalance
-            'min_whales_for_coordination': 3
-        }
-        
-        # Update thresholds from config
-        if config and 'detection' in config:
-            detection_config = config['detection']
-            if 'whale_thresholds' in detection_config:
-                self.thresholds.update(detection_config['whale_thresholds'])
+    def __init__(self, config: Dict):
+        # Initialize base detector
+        super().__init__(config, 'whale')
+    
+    def _load_detector_config(self):
+        """Load whale-specific configuration from config dict"""
+        # Validate and load whale thresholds from config (no hardcoded fallbacks)
+        self.thresholds = self._validate_config_section(
+            'whale_thresholds', 
+            ['whale_threshold_usd', 'coordination_threshold', 'min_whales_for_coordination']
+        )
     
     def detect_whale_activity(self, trades: List[Dict]) -> Dict:
         """Detect large orders from single or coordinated wallets"""

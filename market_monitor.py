@@ -5,8 +5,8 @@ Coordinates data sources and detection algorithms for insider trading detection
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional, Tuple
 import json
 from pathlib import Path
 from colorama import init, Fore, Back, Style
@@ -19,6 +19,11 @@ from data_sources.websocket_client import WebSocketClient
 from detection import VolumeDetector, WhaleDetector, PriceDetector, CoordinationDetector
 from alerts.alert_manager import AlertManager
 from config.settings import Settings
+from common import (
+    AlertType, AlertSeverity, BaselineType, MarketStatus, DetectorStatus,
+    AlertMetadata, Alert, MarketBaseline, DetectionResult,
+    ConfidenceThresholds, TimeConstants, VolumeConstants
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +57,11 @@ class MarketMonitor:
         self.monitored_markets = {}
         self.market_baselines = {}
         self.trade_history = {}
+        self.token_to_outcome = {}  # Maps token ID to "Yes" or "No"
+        
+        # Cross-market activity tracking for context filtering
+        self.recent_market_activities = {}
+        self.cross_market_window_minutes = TimeConstants.CROSS_MARKET_WINDOW_MINUTES
         
         # Control flags
         self.running = False
@@ -231,7 +241,7 @@ class MarketMonitor:
                             new_market_ids.append(condition_id)
                             updated_markets[condition_id] = market
                             
-                            # Collect token IDs for WebSocket subscription
+                            # Collect token IDs for WebSocket subscription and outcome mapping
                             token_ids_raw = market.get('clobTokenIds', [])
                             if token_ids_raw:
                                 try:
@@ -243,6 +253,11 @@ class MarketMonitor:
                                     
                                     if isinstance(token_ids, list):
                                         websocket_token_ids.extend(token_ids[:2])  # Take first 2 from each market
+                                        
+                                        # Map token IDs to outcomes (assuming first token is "Yes", second is "No")
+                                        if len(token_ids) >= 2:
+                                            self.token_to_outcome[token_ids[0]] = "Yes"
+                                            self.token_to_outcome[token_ids[1]] = "No"
                                 except (json.JSONDecodeError, TypeError) as e:
                                     logger.debug(f"Could not parse token IDs for {condition_id}: {e}")
                             
@@ -270,17 +285,23 @@ class MarketMonitor:
     async def _initialize_market_baseline(self, market_id: str, market_data: Dict):
         """Initialize baseline metrics for a new market"""
         try:
-            # Get historical data
-            historical_trades = self.data_api.get_historical_trades(market_id, lookback_hours=24)
+            # Get extended historical data for better baselines
+            historical_trades = self.data_api.get_historical_trades(market_id, lookback_hours=TimeConstants.HISTORICAL_DATA_HOURS)
             
             if historical_trades:
                 # Calculate baseline using volume detector
                 baseline = self.volume_detector.calculate_baseline_metrics(historical_trades)
-                self.market_baselines[market_id] = baseline
                 
-                logger.debug(f"Initialized baseline for {market_data.get('question', 'Unknown')[:30]}...")
+                if baseline and baseline.get('total_volume', 0) > 0:
+                    self.market_baselines[market_id] = baseline
+                    market_name = market_data.get('question', 'Unknown')[:30]
+                    trade_count = len(historical_trades)
+                    total_volume = baseline.get('total_volume', 0)
+                    logger.info(f"📊 Initialized baseline: {market_name}... ({trade_count} trades, ${total_volume:,.0f} volume)")
+                else:
+                    logger.warning(f"⚠️ Invalid baseline calculated for {market_id[:10]}... - insufficient data")
             else:
-                logger.debug(f"No historical data available for {market_id[:10]}...")
+                logger.warning(f"⚠️ No historical data available for {market_id[:10]}... - will use recent trade baselines")
         
         except Exception as e:
             logger.error(f"Failed to initialize baseline for {market_id}: {e}")
@@ -381,13 +402,43 @@ class MarketMonitor:
         print(format_line(f"{Fore.CYAN}Analyses:{Style.RESET_ALL} {Fore.YELLOW}{self.analysis_count}{Style.RESET_ALL} completed"))
         print(format_line(f"{Fore.CYAN}Alerts:{Style.RESET_ALL} {Fore.RED if self.alerts_generated > 0 else Fore.GREEN}{self.alerts_generated}{Style.RESET_ALL} generated"))
         
+        # Baseline status
+        total_markets = len(self.monitored_markets)
+        markets_with_baselines = len(self.market_baselines)
+        if total_markets > 0:
+            baseline_percentage = (markets_with_baselines / total_markets) * 100
+            if markets_with_baselines == total_markets:
+                color = Fore.GREEN
+                status = f"All {markets_with_baselines} markets"
+            elif markets_with_baselines > 0:
+                color = Fore.YELLOW
+                status = f"{markets_with_baselines}/{total_markets} markets ({baseline_percentage:.0f}%)"
+            else:
+                color = Fore.RED
+                status = "No historical baselines"
+            print(format_line(f"{Fore.CYAN}Baselines:{Style.RESET_ALL} {color}{status}{Style.RESET_ALL}"))
+        
+        # Alert breakdown
+        if self.alerts_generated > 0:
+            alert_stats = self.alert_manager.get_statistics()
+            
+            # Show by severity using enum for consistency
+            severity_counts = alert_stats.get('by_severity', {})
+            severity_parts = []
+            for severity in AlertSeverity.get_all_severities():
+                count = severity_counts.get(severity, 0)
+                display_name = AlertSeverity.get_display_name(severity)
+                severity_parts.append(f"{display_name}: {count}")
+            
+            if severity_parts:
+                print(format_line(f"  {Fore.WHITE}{', '.join(severity_parts)}{Style.RESET_ALL}"))
+        
         # WebSocket status
         if self.websocket_client:
             ws_stats = self.websocket_client.get_activity_stats()
             status_color = Fore.GREEN if ws_stats['is_connected'] else Fore.RED
             status_text = "Connected" if ws_stats['is_connected'] else "Disconnected"
             print(format_line(f"{Fore.CYAN}WebSocket:{Style.RESET_ALL} {status_color}{status_text}{Style.RESET_ALL}"))
-            print(format_line(f"  {Fore.WHITE}Activity:{Style.RESET_ALL} {ws_stats['messages_received']} msgs, {ws_stats['trades_processed']} trades, {ws_stats['order_books_received']} order books"))
         else:
             print(format_line(f"{Fore.CYAN}WebSocket:{Style.RESET_ALL} {Fore.RED}Not initialized{Style.RESET_ALL}"))
         
@@ -423,9 +474,19 @@ class MarketMonitor:
             
             if self.debug_config.get('show_trade_samples', False):
                 market_name = self.monitored_markets.get(market_id, {}).get('question', 'Unknown')[:30]
-                logger.info(f"📈 Trade: {market_name}... ${trade_data.get('size', 0):.2f} @ {trade_data.get('price', 0):.3f}")
+                side = trade_data.get('side', 'UNKNOWN')
+                # Map asset_id to proper outcome using token mapping
+                asset_id = trade_data.get('asset_id')
+                outcome = self.token_to_outcome.get(asset_id, 'UNKNOWN')
+                size = trade_data.get('size', 0)
+                price = trade_data.get('price', 0)
+                logger.info(f"📈 Trade: {market_name}... {side} {outcome} ${size:.2f} @ {price:.3f}")
             else:
-                logger.debug(f"📈 Real-time trade: {market_id[:10]}... ${trade_data.get('size', 0):.2f}")
+                side = trade_data.get('side', '?')
+                asset_id = trade_data.get('asset_id')
+                outcome = self.token_to_outcome.get(asset_id, '?')
+                size = trade_data.get('size', 0)
+                logger.debug(f"📈 Real-time trade: {market_id[:10]}... {side} {outcome} ${size:.2f}")
             
         except Exception as e:
             logger.error(f"Error handling real-time trade: {e}")
@@ -458,8 +519,8 @@ class MarketMonitor:
                 if time_since_last >= 15:  # Poll every 15 seconds
                     poll_count += 1
                     try:
-                        # Get recent trades - only for monitored markets
-                        recent_trades = self.data_api.get_recent_trades(market_ids, limit=100)
+                        # Get recent trades - only for monitored markets (increased limit for better data quality)
+                        recent_trades = self.data_api.get_recent_trades(market_ids, limit=500)
                         
                         # Filter for trades newer than last poll
                         new_trades = []
@@ -475,7 +536,13 @@ class MarketMonitor:
                             if new_trades:
                                 newest_trade = max(new_trades, key=lambda t: t.get('timestamp', 0))
                                 newest_time = datetime.fromtimestamp(newest_trade.get('timestamp', 0))
-                                newest_info = f", newest: ${newest_trade.get('size', 0):.0f} @ {newest_trade.get('price', 0):.3f}"
+                                side = newest_trade.get('side', '?')
+                                # Map asset to proper outcome using token mapping
+                                asset_id = newest_trade.get('asset')
+                                outcome = self.token_to_outcome.get(asset_id, '?')
+                                size = newest_trade.get('size', 0)
+                                price = newest_trade.get('price', 0)
+                                newest_info = f", newest: {side} {outcome} ${size:.0f} @ {price:.3f}"
                             logger.info(f"🔄 Poll #{poll_count}: {len(market_ids)} markets, {len(recent_trades)} API trades, {len(new_trades)} new{newest_info}")
                         
                         # Only show this if we actually found new trades
@@ -547,9 +614,9 @@ class MarketMonitor:
         
         for market_id, market_data in self.monitored_markets.items():
             try:
-                alerts = await self._analyze_single_market(market_id, market_data)
-                if alerts:
-                    alerts_this_round += len(alerts)
+                alerts_sent_count = await self._analyze_single_market(market_id, market_data)
+                if alerts_sent_count > 0:
+                    alerts_this_round += alerts_sent_count
                     markets_with_data += 1
                 elif self.debug_config.get('verbose_analysis', False):
                     question = market_data.get('question', 'Unknown')[:40]
@@ -563,59 +630,59 @@ class MarketMonitor:
             self.alerts_generated += alerts_this_round
     
     async def _analyze_single_market(self, market_id: str, market_data: Dict):
-        """Analyze a single market for unusual activity"""
+        """Analyze a single market for unusual activity
+        
+        Returns:
+            int: Number of alerts successfully sent
+        """
         # Get combined trade data (historical + real-time)
         trades = await self._get_market_trades(market_id)
         
         if not trades:
-            return []
+            return 0
         
-        # Run all detection algorithms
+        # Run all detection algorithms and collect results
         alerts = []
         
-        # Volume detection
-        volume_analysis = self.volume_detector.analyze_volume_pattern(trades)
-        if volume_analysis['anomaly']:
-            alert = await self._create_alert(
-                market_id, market_data, 'VOLUME_SPIKE', 
-                volume_analysis, 'HIGH' if volume_analysis['max_anomaly_score'] > 5 else 'MEDIUM'
-            )
-            alerts.append(alert)
+        # Volume detection - use historical baseline if available
+        historical_baseline = self.market_baselines.get(market_id)
+        volume_analysis = self.volume_detector.analyze_volume_pattern(trades, market_id, historical_baseline)
+        
+        # Log baseline source for monitoring
+        if volume_analysis.get('baseline_source') == 'historical':
+            logger.debug(f"🎯 Volume analysis using historical baseline for {market_id[:10]}...")
+        elif volume_analysis.get('baseline_source') == 'recent_trades':
+            logger.warning(f"⚠️ Volume analysis using recent trades baseline for {market_id[:10]}... (no historical data)")
         
         # Whale detection
         whale_analysis = self.whale_detector.detect_whale_activity(trades)
-        if whale_analysis['anomaly']:
-            alert = await self._create_alert(
-                market_id, market_data, 'WHALE_ACTIVITY', 
-                whale_analysis, 'HIGH' if whale_analysis['total_whale_volume'] > 50000 else 'MEDIUM'
-            )
-            alerts.append(alert)
         
         # Price movement detection
         price_analysis = self.price_detector.detect_price_movement(trades)
-        if price_analysis['anomaly']:
-            severity = 'CRITICAL' if any(price_analysis['triggers'].values()) else 'MEDIUM'
-            alert = await self._create_alert(
-                market_id, market_data, 'UNUSUAL_PRICE_MOVEMENT', 
-                price_analysis, severity
-            )
-            alerts.append(alert)
         
         # Coordination detection
         coordination_analysis = self.coordination_detector.detect_coordinated_buying(trades)
-        if coordination_analysis['anomaly']:
-            severity = 'CRITICAL' if coordination_analysis['coordination_score'] > 0.8 else 'HIGH'
-            alert = await self._create_alert(
-                market_id, market_data, 'COORDINATED_TRADING', 
-                coordination_analysis, severity
-            )
-            alerts.append(alert)
         
-        # Send alerts
+        # Multi-metric confidence evaluation
+        detection_results = {
+            AlertType.VOLUME_SPIKE: volume_analysis,
+            AlertType.WHALE_ACTIVITY: whale_analysis,
+            AlertType.UNUSUAL_PRICE_MOVEMENT: price_analysis,
+            AlertType.COORDINATED_TRADING: coordination_analysis
+        }
+        
+        # Evaluate alerts with multi-metric confidence
+        alerts = await self._evaluate_multi_metric_alerts(
+            market_id, market_data, detection_results
+        )
+        
+        # Send alerts and count successful ones
+        alerts_sent_successfully = 0
         for alert in alerts:
-            await self.alert_manager.send_alert(alert)
+            if await self.alert_manager.send_alert(alert):
+                alerts_sent_successfully += 1
         
-        return alerts
+        return alerts_sent_successfully
     
     async def _get_market_trades(self, market_id: str) -> List[Dict]:
         """Get combined trade data for a market"""
@@ -623,8 +690,8 @@ class MarketMonitor:
         
         # Prioritize Data API since WebSocket is having issues
         try:
-            # Get recent trades first
-            recent_trades = self.data_api.get_recent_trades([market_id], limit=200)
+            # Get recent trades first (increased limit for better analysis)
+            recent_trades = self.data_api.get_recent_trades([market_id], limit=VolumeConstants.MAX_TRADES_PER_REQUEST)
             trades.extend(recent_trades)
             logger.debug(f"Fetched {len(recent_trades)} recent trades for {market_id[:10]}...")
         except Exception as e:
@@ -647,15 +714,232 @@ class MarketMonitor:
                              key=lambda t: t.get('timestamp', ''), 
                              reverse=True)
         
-        return sorted_trades[:200]  # Return most recent 200 trades
+        return sorted_trades[:VolumeConstants.MAX_HISTORICAL_TRADES]  # Return most recent trades
     
-    async def _create_alert(self, market_id: str, market_data: Dict, alert_type: str, 
+    async def _evaluate_multi_metric_alerts(self, market_id: str, market_data: Dict, 
+                                          detection_results: Dict) -> List[Dict]:
+        """
+        Evaluate detections with multi-metric confidence requirements
+        Only creates alerts when multiple indicators align or single indicators are very strong
+        """
+        alerts = []
+        
+        # Count active anomalies and calculate confidence scores
+        active_anomalies = []
+        total_confidence_score = 0
+        
+        for alert_type, analysis in detection_results.items():
+            if analysis.get('anomaly', False):
+                # Calculate confidence score for each anomaly type
+                confidence_score = self._calculate_anomaly_confidence(alert_type, analysis)
+                
+                active_anomalies.append({
+                    'type': alert_type,
+                    'analysis': analysis,
+                    'confidence': confidence_score
+                })
+                total_confidence_score += confidence_score
+        
+        # Apply multi-metric logic
+        if len(active_anomalies) == 0:
+            return []  # No anomalies detected
+        
+        elif len(active_anomalies) == 1:
+            # Single anomaly - require very high confidence
+            anomaly = active_anomalies[0]
+            if anomaly['confidence'] >= ConfidenceThresholds.SINGLE_ANOMALY_THRESHOLD:
+                # Record activity and check cross-market filtering
+                severity = self._determine_severity(anomaly['type'], anomaly['analysis'])
+                self._record_market_activity(market_id, anomaly['type'], anomaly['analysis'], severity)
+                
+                should_filter, filter_reason = self._should_filter_cross_market_activity(
+                    market_id, anomaly['type'], anomaly['analysis']
+                )
+                
+                if not should_filter:
+                    alert = await self._create_alert(
+                        market_id, market_data, anomaly['type'], anomaly['analysis'], severity.value
+                    )
+                    alert['filter_reason'] = filter_reason
+                    alert['confidence_score'] = anomaly['confidence']
+                    alert['multi_metric'] = False
+                    alerts.append(alert)
+                    logger.info(f"🔥 HIGH-CONFIDENCE single alert: {anomaly['type']} for {market_id[:10]}... (confidence: {anomaly['confidence']:.1f})")
+                else:
+                    logger.info(f"🚫 High-confidence alert filtered: {anomaly['type']} for {market_id[:10]}... - {filter_reason}")
+        
+        elif len(active_anomalies) >= 2:
+            # Multiple anomalies - create composite alert with lower individual thresholds
+            if total_confidence_score >= ConfidenceThresholds.MULTI_ANOMALY_THRESHOLD:
+                # Find primary anomaly (highest confidence)
+                primary_anomaly = max(active_anomalies, key=lambda x: x['confidence'])
+                
+                # Record activity for primary anomaly
+                severity = AlertSeverity.CRITICAL if total_confidence_score >= ConfidenceThresholds.CRITICAL_THRESHOLD else AlertSeverity.HIGH
+                self._record_market_activity(market_id, primary_anomaly['type'], primary_anomaly['analysis'], severity)
+                
+                should_filter, filter_reason = self._should_filter_cross_market_activity(
+                    market_id, primary_anomaly['type'], primary_anomaly['analysis']
+                )
+                
+                if not should_filter:
+                    # Create composite alert with all anomaly information
+                    alert = await self._create_alert(
+                        market_id, market_data, primary_anomaly['type'], primary_anomaly['analysis'], severity.value
+                    )
+                    alert['filter_reason'] = filter_reason
+                    alert['confidence_score'] = total_confidence_score
+                    alert['multi_metric'] = True
+                    alert['supporting_anomalies'] = [
+                        {'type': a['type'], 'confidence': a['confidence']} 
+                        for a in active_anomalies if a != primary_anomaly
+                    ]
+                    alerts.append(alert)
+                    logger.info(f"🎯 MULTI-METRIC alert: {primary_anomaly['type']} + {len(active_anomalies)-1} others for {market_id[:10]}... (total confidence: {total_confidence_score:.1f})")
+                else:
+                    logger.info(f"🚫 Multi-metric alert filtered: {primary_anomaly['type']} for {market_id[:10]}... - {filter_reason}")
+        
+        return alerts
+    
+    def _calculate_anomaly_confidence(self, alert_type: AlertType, analysis: Dict) -> float:
+        """Calculate confidence score for a specific anomaly (0-10 scale)"""
+        confidence = 0.0
+        
+        if alert_type == AlertType.VOLUME_SPIKE:
+            # Base confidence on anomaly score and baseline quality
+            confidence += min(analysis.get('max_anomaly_score', 0) * 1.5, 8.0)
+            if analysis.get('baseline_source') == BaselineType.HISTORICAL.value:
+                confidence += ConfidenceThresholds.HISTORICAL_BASELINE_BONUS
+        
+        elif alert_type == AlertType.WHALE_ACTIVITY:
+            # Base confidence on whale volume and coordination
+            whale_volume = analysis.get('total_whale_volume', 0)
+            coordination = analysis.get('coordination', {})
+            
+            confidence += min(whale_volume / 10000, 6.0)  # Up to 6 points for volume
+            if coordination.get('coordinated', False):
+                confidence += ConfidenceThresholds.COORDINATION_BONUS
+            if analysis.get('direction_imbalance', 0) > 0.8:
+                confidence += ConfidenceThresholds.DIRECTIONAL_BIAS_BONUS
+        
+        elif alert_type == AlertType.UNUSUAL_PRICE_MOVEMENT:
+            # Base confidence on trigger intensity
+            triggers = analysis.get('triggers', {})
+            confidence += sum(2.0 for trigger in triggers.values() if trigger)
+            
+            # Bonus for multiple simultaneous triggers  
+            active_triggers = sum(1 for t in triggers.values() if t)
+            if active_triggers >= 3:
+                confidence += ConfidenceThresholds.MULTI_TRIGGER_BONUS
+        
+        elif alert_type == AlertType.COORDINATED_TRADING:
+            # Base confidence on coordination score
+            coord_score = analysis.get('coordination_score', 0)
+            confidence += coord_score * 8.0  # Scale 0-1 to 0-8
+            
+            # Bonus for wash trading detection
+            if analysis.get('wash_trading_detected', False):
+                confidence += ConfidenceThresholds.WASH_TRADING_BONUS
+        
+        return min(confidence, ConfidenceThresholds.MAX_CONFIDENCE_SCORE)
+    
+    def _determine_severity(self, alert_type: AlertType, analysis: Dict) -> AlertSeverity:
+        """Determine alert severity based on alert type and analysis"""
+        if alert_type == AlertType.VOLUME_SPIKE:
+            return AlertSeverity.HIGH if analysis.get('max_anomaly_score', 0) > 5 else AlertSeverity.MEDIUM
+        elif alert_type == AlertType.WHALE_ACTIVITY:
+            return AlertSeverity.HIGH if analysis.get('total_whale_volume', 0) > 50000 else AlertSeverity.MEDIUM
+        elif alert_type == AlertType.UNUSUAL_PRICE_MOVEMENT:
+            return AlertSeverity.CRITICAL if any(analysis.get('triggers', {}).values()) else AlertSeverity.MEDIUM
+        elif alert_type == AlertType.COORDINATED_TRADING:
+            return AlertSeverity.CRITICAL if analysis.get('coordination_score', 0) > 0.8 else AlertSeverity.HIGH
+        return AlertSeverity.MEDIUM
+    
+    def _record_market_activity(self, market_id: str, alert_type: AlertType, analysis: Dict, severity: AlertSeverity):
+        """Record market activity for cross-market analysis"""
+        current_time = datetime.now(timezone.utc)
+        
+        # Clean old activities outside the time window
+        cutoff_time = current_time - timedelta(minutes=self.cross_market_window_minutes)
+        for mid in list(self.recent_market_activities.keys()):
+            self.recent_market_activities[mid] = [
+                activity for activity in self.recent_market_activities[mid]
+                if activity['timestamp'] > cutoff_time
+            ]
+            if not self.recent_market_activities[mid]:
+                del self.recent_market_activities[mid]
+        
+        # Record new activity
+        if market_id not in self.recent_market_activities:
+            self.recent_market_activities[market_id] = []
+        
+        activity = {
+            'timestamp': current_time,
+            'alert_type': alert_type.value,  # Store as string for JSON serialization
+            'severity': severity.value,      # Store as string for JSON serialization
+            'analysis': analysis
+        }
+        
+        self.recent_market_activities[market_id].append(activity)
+    
+    def _should_filter_cross_market_activity(self, market_id: str, alert_type: AlertType, analysis: Dict) -> Tuple[bool, str]:
+        """
+        Check if this alert should be filtered due to cross-market activity
+        
+        Returns:
+            - should_filter: bool - True if alert should be filtered
+            - reason: str - Reason for filtering decision
+        """
+        # Count similar activities across markets in recent time window
+        similar_activities = 0
+        total_markets_with_activity = len(self.recent_market_activities)
+        
+        if total_markets_with_activity < ConfidenceThresholds.MIN_SIMILAR_MARKETS:
+            # Need at least 3 markets with activity to consider platform-wide
+            return False, f"Only {total_markets_with_activity} markets active"
+        
+        # Count markets with similar alert types
+        markets_with_similar_alerts = 0
+        for mid, activities in self.recent_market_activities.items():
+            if mid == market_id:
+                continue  # Don't count self
+            
+            # Check for similar alert types in recent activities
+            for activity in activities[-3:]:  # Check last 3 activities per market
+                if activity['alert_type'] == alert_type.value:
+                    markets_with_similar_alerts += 1
+                    break  # Count each market only once
+        
+        # Filter if 3+ other markets show similar anomalous activity
+        if markets_with_similar_alerts >= ConfidenceThresholds.MIN_SIMILAR_MARKETS:
+            return True, f"Platform-wide activity: {markets_with_similar_alerts + 1} markets show {alert_type}"
+        
+        # Special case for volume spikes - check if overall platform volume is high
+        if alert_type == AlertType.VOLUME_SPIKE:
+            volume_spike_markets = 0
+            for activities in self.recent_market_activities.values():
+                for activity in activities[-2:]:  # Check last 2 activities per market
+                    if (activity['alert_type'] == AlertType.VOLUME_SPIKE.value and 
+                        activity.get('analysis', {}).get('max_anomaly_score', 0) > 3):
+                        volume_spike_markets += 1
+                        break
+            
+            if volume_spike_markets >= ConfidenceThresholds.VOLUME_SURGE_MARKETS:
+                return True, f"Platform volume surge: {volume_spike_markets} markets with volume spikes"
+        
+        # Allow the alert - not platform-wide activity
+        return False, f"Isolated activity (only {markets_with_similar_alerts} similar markets)"
+    
+    async def _create_alert(self, market_id: str, market_data: Dict, alert_type, 
                           analysis: Dict, severity: str) -> Dict:
         """Create an alert from detection results"""
+        # Convert AlertType enum to string if needed
+        alert_type_str = alert_type.value if hasattr(alert_type, 'value') else str(alert_type)
+        
         return {
             'market_id': market_id,
             'market_question': market_data.get('question', 'Unknown Market'),
-            'alert_type': alert_type,
+            'alert_type': alert_type_str,
             'severity': severity,
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'analysis': analysis,
@@ -663,7 +947,7 @@ class MarketMonitor:
                 'volume24hr': market_data.get('volume24hr', 0),
                 'lastTradePrice': market_data.get('lastTradePrice', 0)
             },
-            'recommended_action': self._get_recommended_action(alert_type, severity, analysis)
+            'recommended_action': self._get_recommended_action(alert_type_str, severity, analysis)
         }
     
     def _get_recommended_action(self, alert_type: str, severity: str, analysis: Dict) -> str:

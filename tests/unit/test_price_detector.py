@@ -9,6 +9,7 @@ import numpy as np
 
 from detection.price_detector import PriceDetector
 from tests.fixtures.data_generators import MockDataGenerator
+from tests.test_utils import create_test_config, setup_detector_for_testing
 
 
 class TestPriceDetector:
@@ -17,17 +18,9 @@ class TestPriceDetector:
     @pytest.fixture
     def detector(self):
         """Create PriceDetector instance for testing."""
-        config = {
-            'detection': {
-                'price_thresholds': {
-                    'rapid_movement_pct': 20,
-                    'price_movement_std': 3.0,
-                    'volatility_spike_multiplier': 4.0,
-                    'momentum_threshold': 0.9
-                }
-            }
-        }
-        return PriceDetector(config)
+        config = create_test_config()
+        detector = PriceDetector(config)
+        return setup_detector_for_testing(detector)
     
     @pytest.fixture
     def normal_price_trades(self):
@@ -47,21 +40,15 @@ class TestPriceDetector:
         generator = MockDataGenerator()
         return generator.generate_pump_and_dump_pattern()
     
-    def test_init_default_config(self):
-        """Test PriceDetector initialization with default config."""
-        detector = PriceDetector()
-        assert detector.thresholds['rapid_movement_pct'] == 15
-        assert detector.thresholds['price_movement_std'] == 2.5
-        assert detector.thresholds['volatility_spike_multiplier'] == 3.0
-        assert detector.thresholds['momentum_threshold'] == 0.8
-    
     def test_init_custom_config(self):
         """Test PriceDetector initialization with custom config."""
         config = {
             'detection': {
                 'price_thresholds': {
                     'rapid_movement_pct': 25,
-                    'volatility_spike_multiplier': 5.0
+                    'price_movement_std': 2.5,
+                    'volatility_spike_multiplier': 5.0,
+                    'momentum_threshold': 0.8
                 }
             }
         }

@@ -8,28 +8,24 @@ from typing import Dict, List, Tuple
 from datetime import datetime, timedelta, timezone
 import logging
 from collections import defaultdict
+from .base_detector import DetectorBase
 
 logger = logging.getLogger(__name__)
 
-class CoordinationDetector:
+class CoordinationDetector(DetectorBase):
     """Detects coordinated trading patterns that may indicate insider activity"""
     
-    def __init__(self, config: Dict = None):
-        self.config = config or {}
-        self.thresholds = {
-            'min_coordinated_wallets': 5,  # Minimum wallets for coordination
-            'coordination_time_window': 30,  # Minutes
-            'directional_bias_threshold': 0.8,  # 80% same direction
-            'new_wallet_threshold': 5,  # Less than 5 previous trades
-            'burst_intensity_threshold': 3.0,  # 3x normal activity
-            'similar_size_variance': 0.3  # Low variance indicates coordination
-        }
-        
-        # Update thresholds from config
-        if config and 'detection' in config:
-            detection_config = config['detection']
-            if 'coordination_thresholds' in detection_config:
-                self.thresholds.update(detection_config['coordination_thresholds'])
+    def __init__(self, config: Dict):
+        # Initialize base detector
+        super().__init__(config, 'coordination')
+    
+    def _load_detector_config(self):
+        """Load coordination-specific configuration from config dict"""
+        # Validate and load coordination thresholds from config (no hardcoded fallbacks)
+        self.thresholds = self._validate_config_section(
+            'coordination_thresholds', 
+            ['min_coordinated_wallets', 'coordination_time_window', 'directional_bias_threshold', 'burst_intensity_threshold']
+        )
     
     def detect_coordinated_buying(self, trades: List[Dict]) -> Dict:
         """Detect multiple wallets buying in coordination"""

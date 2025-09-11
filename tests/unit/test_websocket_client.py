@@ -93,7 +93,6 @@ class TestActivityTracking:
         stats = client.get_activity_stats()
         
         assert stats['messages_received'] == 0
-        assert stats['trades_processed'] == 0
         assert stats['order_books_received'] == 0
         assert stats['is_connected'] is False
         assert stats['reconnect_attempts'] == 0
@@ -104,14 +103,12 @@ class TestActivityTracking:
         
         # Simulate processing messages
         client.messages_received = 10
-        client.trades_processed = 2
         client.order_books_received = 8
         client.is_connected = True
         
         stats = client.get_activity_stats()
         
         assert stats['messages_received'] == 10
-        assert stats['trades_processed'] == 2
         assert stats['order_books_received'] == 8
         assert stats['is_connected'] is True
 
@@ -119,34 +116,6 @@ class TestActivityTracking:
 class TestMessageProcessing:
     """Test WebSocket message processing"""
     
-    def test_process_trade_event_valid_trade(self, mock_trade_callback, mock_debug_config, sample_trade_data):
-        """Test processing valid trade event"""
-        client = WebSocketClient(['token1'], mock_trade_callback, mock_debug_config)
-        
-        # Create trade message
-        trade_message = {
-            'type': 'trade',
-            'data': sample_trade_data
-        }
-        
-        client._process_trade_event(trade_message)
-        
-        # Verify trade callback was called
-        mock_trade_callback.assert_called_once()
-        assert client.trades_processed == 1
-    
-    def test_process_trade_event_flat_structure(self, mock_trade_callback, mock_debug_config, sample_trade_data):
-        """Test processing trade event with flat data structure"""
-        client = WebSocketClient(['token1'], mock_trade_callback, mock_debug_config)
-        
-        # Add type field to flat trade data
-        flat_trade = sample_trade_data.copy()
-        flat_trade['type'] = 'trade'
-        
-        client._process_trade_event(flat_trade)
-        
-        mock_trade_callback.assert_called_once()
-        assert client.trades_processed == 1
     
     def test_process_order_book_event(self, mock_trade_callback, mock_debug_config, sample_order_book_data):
         """Test processing order book event"""
@@ -157,7 +126,6 @@ class TestMessageProcessing:
         # Should not call trade callback for order book
         mock_trade_callback.assert_not_called()
         assert client.order_books_received == 1
-        assert client.trades_processed == 0
     
     def test_process_subscription_confirmation(self, mock_trade_callback, mock_debug_config):
         """Test processing subscription confirmation"""
@@ -191,50 +159,6 @@ class TestMessageProcessing:
             mock_logger.error.assert_called_once()
             mock_trade_callback.assert_not_called()
 
-
-class TestTradeDataNormalization:
-    """Test trade data normalization"""
-    
-    def test_normalize_trade_data_valid(self, mock_trade_callback, mock_debug_config, sample_trade_data):
-        """Test normalization of valid trade data"""
-        client = WebSocketClient(['token1'], mock_trade_callback, mock_debug_config)
-        
-        normalized = client._normalize_trade_data(sample_trade_data)
-        
-        assert normalized is not None
-        assert normalized['market'] == sample_trade_data['market']
-        assert normalized['price'] == float(sample_trade_data['price'])
-        assert normalized['size'] == float(sample_trade_data['size'])
-        assert normalized['side'] == sample_trade_data['side']
-        assert normalized['source'] == 'websocket'
-    
-    def test_normalize_trade_data_missing_required_fields(self, mock_trade_callback, mock_debug_config):
-        """Test normalization with missing required fields"""
-        client = WebSocketClient(['token1'], mock_trade_callback, mock_debug_config)
-        
-        invalid_data = {
-            'market': 'test-market',
-            # Missing price and size
-        }
-        
-        normalized = client._normalize_trade_data(invalid_data)
-        
-        assert normalized is None
-    
-    def test_normalize_trade_data_invalid_types(self, mock_trade_callback, mock_debug_config):
-        """Test normalization with invalid data types"""
-        client = WebSocketClient(['token1'], mock_trade_callback, mock_debug_config)
-        
-        invalid_data = {
-            'market': 'test-market',
-            'price': 'not_a_number',
-            'size': 'also_not_a_number',
-            'side': 'BUY'
-        }
-        
-        normalized = client._normalize_trade_data(invalid_data)
-        
-        assert normalized is None
 
 
 class TestWebSocketHandlers:
@@ -298,9 +222,8 @@ class TestSubscriptionManagement:
         
         client._subscribe_to_markets()
         
-        # Should send 5 subscription types
-        assert mock_ws.send.call_count == 5
-        mock_sleep.assert_called()
+        # Should send 1 market subscription
+        assert mock_ws.send.call_count == 1
     
     def test_add_markets(self, mock_trade_callback, mock_debug_config):
         """Test adding new markets"""
