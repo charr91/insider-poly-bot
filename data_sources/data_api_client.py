@@ -45,19 +45,22 @@ class DataAPIClient:
     
     def get_recent_trades(self, market_ids: List[str], limit: int = 100) -> List[Dict]:
         """Get recent trades across multiple markets"""
-        market_param = ",".join(market_ids)
-        
         params = {
-            'market': market_param,
             'limit': min(limit, 500)
         }
+        
+        # Only add market filter if market_ids provided
+        if market_ids:
+            market_param = ",".join(market_ids)
+            params['market'] = market_param
         
         try:
             response = self.session.get(self.trades_endpoint, params=params, timeout=10)
             response.raise_for_status()
             
             trades = response.json()
-            logger.debug(f"Fetched {len(trades)} recent trades across {len(market_ids)} markets")
+            market_info = f" across {len(market_ids)} markets" if market_ids else " (all markets)"
+            logger.debug(f"Fetched {len(trades)} recent trades{market_info}")
             return trades
             
         except requests.exceptions.RequestException as e:

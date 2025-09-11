@@ -133,7 +133,8 @@ class MarketMonitor:
             asyncio.create_task(self._market_discovery_loop(), name="market_discovery"),
             asyncio.create_task(self._analysis_loop(), name="analysis"),
             asyncio.create_task(self._websocket_monitor(), name="websocket"),
-            asyncio.create_task(self._status_reporter(), name="status_reporter")
+            asyncio.create_task(self._status_reporter(), name="status_reporter"),
+            asyncio.create_task(self._trade_polling_loop(), name="trade_polling")  # NEW: Real-time trade polling
         ]
         
         try:
@@ -406,6 +407,7 @@ class MarketMonitor:
         """Handle incoming real-time trade data"""
         try:
             market_id = trade_data.get('market')
+            
             if not market_id or market_id not in self.monitored_markets:
                 return
             
@@ -427,6 +429,98 @@ class MarketMonitor:
             
         except Exception as e:
             logger.error(f"Error handling real-time trade: {e}")
+    
+    async def _trade_polling_loop(self):
+        """Poll Data API for recent trades to supplement WebSocket data"""
+        last_poll_time = datetime.now(timezone.utc)
+        trades_detected_this_period = 0
+        poll_count = 0
+        
+        if self.debug_mode:
+            print(f"{Fore.CYAN}🔄 {Style.BRIGHT}TRADE POLLING STARTED{Style.RESET_ALL}")
+        
+        while self.running:
+            try:
+                if not self.monitored_markets:
+                    if self.debug_mode:
+                        logger.info("⏳ Trade polling waiting for markets to be discovered...")
+                    await asyncio.sleep(30)
+                    continue
+                
+                # Get market IDs to poll (try all markets first, then limit if needed)
+                all_market_ids = list(self.monitored_markets.keys())
+                market_ids = all_market_ids  # Start with all markets for better coverage
+                
+                # Get recent trades from last poll
+                current_time = datetime.now(timezone.utc)
+                time_since_last = (current_time - last_poll_time).total_seconds()
+                
+                if time_since_last >= 15:  # Poll every 15 seconds
+                    poll_count += 1
+                    try:
+                        if self.debug_mode:
+                            logger.info(f"🔄 Poll #{poll_count}: Checking {len(market_ids)} markets for new trades")
+                            logger.info(f"⏰ Time since last poll: {time_since_last:.1f} seconds")
+                        
+                        # Get recent trades - only for monitored markets
+                        recent_trades = self.data_api.get_recent_trades(market_ids, limit=100)
+                        
+                        if self.debug_mode:
+                            logger.info(f"📡 Data API returned {len(recent_trades)} total trades")
+                        
+                        # Filter for trades newer than last poll
+                        new_trades = []
+                        cutoff_timestamp = last_poll_time.timestamp()
+                        
+                        for trade in recent_trades:
+                            trade_timestamp = trade.get('timestamp', 0)
+                            if trade_timestamp > cutoff_timestamp:
+                                new_trades.append(trade)
+                        
+                        if self.debug_mode:
+                            logger.info(f"🆕 Found {len(new_trades)} trades newer than {last_poll_time.strftime('%H:%M:%S')}")
+                            if new_trades:
+                                newest_trade = max(new_trades, key=lambda t: t.get('timestamp', 0))
+                                newest_time = datetime.fromtimestamp(newest_trade.get('timestamp', 0))
+                                logger.info(f"📈 Newest trade: {newest_time.strftime('%H:%M:%S')} - ${newest_trade.get('size', 0):.2f} @ {newest_trade.get('price', 0):.3f}")
+                        
+                        # Process new trades
+                        for trade in new_trades:
+                            # Normalize trade data to match WebSocket format
+                            normalized_trade = {
+                                'market': trade.get('conditionId'),
+                                'asset_id': trade.get('asset'),
+                                'price': float(trade.get('price', 0)),
+                                'size': float(trade.get('size', 0)),
+                                'side': trade.get('side', '').upper(),
+                                'maker': trade.get('proxyWallet'),  # Use proxyWallet as maker
+                                'taker': None,  # Data API doesn't provide taker
+                                'timestamp': trade.get('timestamp'),
+                                'tx_hash': trade.get('transactionHash'),
+                                'source': 'data_api'
+                            }
+                            
+                            
+                            # Process the trade as if it came from WebSocket
+                            self._handle_realtime_trade(normalized_trade)
+                            trades_detected_this_period += 1
+                        
+                        if new_trades and (self.debug_mode or self.show_normal_activity):
+                            print(f"{Fore.GREEN}🔄 {Style.BRIGHT}TRADE POLLING:{Style.RESET_ALL} Found {len(new_trades)} new trades")
+                        
+                        last_poll_time = current_time
+                        
+                    except Exception as e:
+                        logger.error(f"Error in trade polling: {e}")
+                        if self.debug_mode:
+                            import traceback
+                            logger.error(f"Trade polling traceback: {traceback.format_exc()}")
+                
+                await asyncio.sleep(5)  # Check every 5 seconds, poll every 15
+                
+            except Exception as e:
+                logger.error(f"Error in trade polling loop: {e}")
+                await asyncio.sleep(30)
     
     async def _analysis_loop(self):
         """Main analysis loop - runs detection algorithms"""

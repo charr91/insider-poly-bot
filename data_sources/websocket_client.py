@@ -129,7 +129,39 @@ class WebSocketClient:
         try:
             msg_type = data.get('type', data.get('event', ''))
             
+            # DEBUG: Log first few messages to see what we're getting
+            if hasattr(self, '_debug_message_count'):
+                self._debug_message_count += 1
+            else:
+                self._debug_message_count = 1
+                
+            if self._debug_message_count <= 10 and self.debug_mode:
+                logger.info(f"🔍 DEBUG MESSAGE #{self._debug_message_count}: type='{msg_type}', event_type='{data.get('event_type', 'N/A')}', keys={list(data.keys())[:10]}")
+                # Look for any trade-like fields
+                trade_fields = ['price', 'size', 'maker', 'taker', 'side', 'amount', 'volume', 'quantity']
+                found_fields = [f for f in trade_fields if f in data]
+                if found_fields:
+                    logger.info(f"🔍 POTENTIAL TRADE FIELDS: {found_fields}")
+                    logger.info(f"🔍 SAMPLE DATA: {dict((k, v) for k, v in data.items() if k in found_fields)}")
+            
+            # Check for trade events - try multiple approaches
+            is_trade = False
+            event_type = data.get('event_type', '')
+            
             if msg_type in ['trade', 'TRADE']:
+                is_trade = True
+            elif event_type in ['trade', 'TRADE', 'fill', 'FILL', 'execution', 'EXECUTION']:
+                # Trade identified by event_type field
+                is_trade = True
+                if self.debug_mode:
+                    logger.info(f"🔍 DETECTED TRADE BY EVENT_TYPE: {event_type}")
+            elif not msg_type and ('price' in data and 'size' in data and ('maker' in data or 'taker' in data)):
+                # Trade without explicit type but has trade fields
+                is_trade = True
+                if self.debug_mode:
+                    logger.info(f"🔍 DETECTED TRADE WITHOUT TYPE: {data}")
+            
+            if is_trade:
                 # This is a trade event - process it
                 trade_data = self._normalize_trade_data(data)
                 
@@ -190,7 +222,7 @@ class WebSocketClient:
                 total_width = len(top_border)
                 
                 print(f"{Fore.MAGENTA}{top_border}{Style.RESET_ALL}")
-                print(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Messages:{Style.RESET_ALL} {Fore.WHITE}{self.messages_received:>4}{Style.RESET_ALL} {Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Trades:{Style.RESET_ALL} {Fore.GREEN if self.trades_processed > 0 else Fore.YELLOW}{self.trades_processed:>4}{Style.RESET_ALL} {Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Books:{Style.RESET_ALL} {Fore.BLUE}{self.order_books_received:>4}{Style.RESET_ALL} {Fore.MAGENTA}│{Style.RESET_ALL}")
+                print(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Messages:{Style.RESET_ALL} {Fore.WHITE}{self.messages_received:>4}{Style.RESET_ALL} {Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Order Books:{Style.RESET_ALL} {Fore.BLUE}{self.order_books_received:>4}{Style.RESET_ALL} {Fore.MAGENTA}")
                 print(f"{Fore.MAGENTA}└{'─' * (total_width - 2)}┘{Style.RESET_ALL}")  # -2 for └┘
             
             # Reset counters for next period
@@ -228,19 +260,30 @@ class WebSocketClient:
         if not self.ws or not self.market_ids:
             return
             
-        # Use correct Polymarket WebSocket format  
-        # assets_ids should be token IDs from clobTokenIds
-        subscribe_msg = {
-            "type": "MARKET",
-            "assets_ids": self.market_ids  # Subscribe to all tokens
-        }
+        # Try multiple subscription approaches to get trades
+        subscriptions = [
+            # Market data (working)
+            {"type": "MARKET", "assets_ids": self.market_ids},
+            
+            # Try different trade subscription formats
+            {"type": "TRADES", "assets_ids": self.market_ids},
+            {"type": "FILL", "assets_ids": self.market_ids}, 
+            {"type": "TRADE", "assets_ids": self.market_ids},
+            {"type": "EXECUTION", "assets_ids": self.market_ids},
+        ]
         
         try:
-            msg_json = json.dumps(subscribe_msg)
-            logger.info(f"📤 Sending subscription for {len(self.market_ids)} tokens")
-            logger.debug(f"📤 Full subscription: {msg_json[:200]}...")
-            self.ws.send(msg_json)
-            logger.info(f"✅ Sent subscription to WebSocket for {len(self.market_ids)} tokens")
+            # Send all subscription types
+            for i, sub in enumerate(subscriptions):
+                sub_json = json.dumps(sub)
+                sub_type = sub["type"]
+                logger.info(f"📤 Sending {sub_type} subscription for {len(self.market_ids)} tokens")
+                if self.debug_mode:
+                    logger.debug(f"📤 Subscription {i+1}: {sub_json[:200]}...")
+                self.ws.send(sub_json)
+                time.sleep(0.1)  # Small delay between subscriptions
+            
+            logger.info(f"✅ Sent {len(subscriptions)} subscription types for {len(self.market_ids)} tokens")
             
         except Exception as e:
             logger.error(f"❌ Failed to subscribe to markets: {e}")
