@@ -173,6 +173,62 @@ insider-poly-bot/
 - **Timing Analysis**: Detects synchronized trading patterns
 - **Directional Bias**: Measures coordinated directional trading
 
+## 📊 Technical Fields Reference
+
+Understanding the key metrics and scores used in alert analysis:
+
+### 🎯 Anomaly Score System
+- **Calculation Method**: Z-score based (standard deviations above historical baseline)
+- **Interpretation Scale**:
+  - **0-2**: Normal market activity
+  - **3-5**: Unusual but not necessarily suspicious activity
+  - **6-8**: Potentially suspicious activity worth monitoring
+  - **8+**: High anomaly requiring investigation
+  - **10+**: Critical anomaly (very rare, immediate attention)
+
+### 🎯 Confidence Scoring System
+Multi-metric scoring system that combines various detection signals:
+
+- **Single Anomaly Threshold**: `8.0` - High confidence required for single-metric alerts
+- **Multi-Anomaly Threshold**: `10.0` - Combined metrics increase detection sensitivity
+- **Critical Threshold**: `15.0` - Immediate attention required
+
+**Confidence Bonuses Applied**:
+- Historical Baseline Match: `+1.0`
+- Coordination Detected: `+2.0` 
+- Directional Bias: `+1.0`
+- Multi-Trigger Events: `+2.0`
+- Wash Trading Patterns: `+2.0`
+
+### 🎯 Detection Parameters
+
+**Volume Spike Detection**:
+- **Multiplier**: `3.0x` above baseline average
+- **Statistical Analysis**: Z-score threshold of `3.0`
+- **Baseline Period**: 7-day historical data window
+
+**Whale Activity Thresholds**:
+- **Minimum Trade Size**: `$10,000` USD
+- **Coordination Threshold**: `0.7` (70% directional alignment)
+- **Minimum Whales**: `3+` for coordination detection
+
+**Price Movement Analysis**:
+- **Rapid Movement**: `15%` price change threshold
+- **Volatility Multiplier**: `3.0x` above normal volatility
+- **Momentum Threshold**: `0.8` for sustained directional movement
+
+**Coordination Detection**:
+- **Minimum Wallets**: `5` coordinated wallets required
+- **Time Window**: `30` seconds for coordination analysis
+- **Directional Bias**: `0.8` threshold for coordinated direction
+- **Burst Intensity**: `3.0` multiplier for rapid coordination
+
+### 🎯 Cross-Market Filtering
+- **Analysis Window**: `15` minutes for cross-market correlation
+- **Similar Market Threshold**: `3+` markets showing similar patterns
+- **Volume Surge Detection**: `4+` markets with simultaneous volume increases
+- **Filter Strategy**: Quality-based filtering using confidence scores and anomaly strength
+
 ## 🔐 Security Features
 
 - **No Private Key Storage**: Read-only market monitoring
