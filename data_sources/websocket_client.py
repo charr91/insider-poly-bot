@@ -231,7 +231,7 @@ class WebSocketClient:
                 
                 # Create a nice activity report box with consistent width
                 title = f"─ WebSocket Activity ({time_display}) "
-                remaining_dashes = max(0, 48 - len(title))  # Target total width of 48 inside chars
+                remaining_dashes = max(0, 40 - len(title))  # Target total width of 48 inside chars
                 top_border = f"┌{title}{'─' * remaining_dashes}┐"
                 total_width = len(top_border)
                 
