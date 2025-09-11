@@ -205,12 +205,8 @@ class WebSocketClient:
             else:
                 # This is an order book update
                 self.order_books_received += 1
-                if self.show_activity and self.order_books_received <= 3:
-                    # Show first few order book updates to confirm we're getting data
-                    market_id = data.get('market', data.get('asset_id', 'Unknown'))[:10]
-                    msg_type_display = msg_type if msg_type else 'order_book'
-                    print(f"{Fore.BLUE}📩 {Style.BRIGHT}Order Book #{self.order_books_received}:{Style.RESET_ALL} {Fore.CYAN}{market_id}...{Style.RESET_ALL} {Fore.WHITE}({msg_type_display}){Style.RESET_ALL}")
-                elif self.show_activity:
+                # Order book display removed - count now shown in System Status
+                if self.debug_mode:
                     logger.debug(f"📩 Order book #{self.order_books_received} for market {data.get('market', 'Unknown')[:10]}...")
                 
         except Exception as e:
@@ -222,24 +218,7 @@ class WebSocketClient:
         time_since_last_report = (now - self.last_activity_report).total_seconds()
         
         if time_since_last_report >= self.activity_report_interval:
-            if self.show_activity or self.debug_mode:
-                # Format time display appropriately
-                if time_since_last_report >= 60:
-                    time_display = f"{int(time_since_last_report/60)} min"
-                else:
-                    time_display = f"{int(time_since_last_report)} sec"
-                
-                # Create a nice activity report box with consistent width
-                title = f"─ WebSocket Activity ({time_display}) "
-                remaining_dashes = max(0, 40 - len(title))  # Target total width of 48 inside chars
-                top_border = f"┌{title}{'─' * remaining_dashes}┐"
-                total_width = len(top_border)
-                
-                print(f"{Fore.MAGENTA}{top_border}{Style.RESET_ALL}")
-                print(f"{Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Messages:{Style.RESET_ALL} {Fore.WHITE}{self.messages_received:>4}{Style.RESET_ALL} {Fore.MAGENTA}│{Style.RESET_ALL} {Fore.CYAN}Order Books:{Style.RESET_ALL} {Fore.BLUE}{self.order_books_received:>4}{Style.RESET_ALL} {Fore.MAGENTA}")
-                print(f"{Fore.MAGENTA}└{'─' * (total_width - 2)}┘{Style.RESET_ALL}")  # -2 for └┘
-            
-            # Reset counters for next period
+            # Reset counters for next period and update stats tracking
             self.messages_received = 0
             self.trades_processed = 0  
             self.order_books_received = 0

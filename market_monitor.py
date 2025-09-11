@@ -373,7 +373,7 @@ class MarketMonitor:
             # Remove ALL ANSI codes to measure actual text length
             import re
             clean_content = re.sub(r'\x1b\[[0-9;]*[mGKHJ]', '', content)
-            padding = max(0, 56 - len(clean_content))
+            padding = max(0, 57 - len(clean_content))
             return f"{Fore.BLUE}│{Style.RESET_ALL} {content}{' ' * padding}{Fore.BLUE}│{Style.RESET_ALL}"
         
         # Basic system status
@@ -387,7 +387,7 @@ class MarketMonitor:
             status_color = Fore.GREEN if ws_stats['is_connected'] else Fore.RED
             status_text = "Connected" if ws_stats['is_connected'] else "Disconnected"
             print(format_line(f"{Fore.CYAN}WebSocket:{Style.RESET_ALL} {status_color}{status_text}{Style.RESET_ALL}"))
-            print(format_line(f"  {Fore.WHITE}Activity:{Style.RESET_ALL} {ws_stats['messages_received']} msgs, {ws_stats['trades_processed']} trades"))
+            print(format_line(f"  {Fore.WHITE}Activity:{Style.RESET_ALL} {ws_stats['messages_received']} msgs, {ws_stats['trades_processed']} trades, {ws_stats['order_books_received']} order books"))
         else:
             print(format_line(f"{Fore.CYAN}WebSocket:{Style.RESET_ALL} {Fore.RED}Not initialized{Style.RESET_ALL}"))
         
@@ -458,15 +458,8 @@ class MarketMonitor:
                 if time_since_last >= 15:  # Poll every 15 seconds
                     poll_count += 1
                     try:
-                        if self.debug_mode:
-                            logger.info(f"🔄 Poll #{poll_count}: Checking {len(market_ids)} markets for new trades")
-                            logger.info(f"⏰ Time since last poll: {time_since_last:.1f} seconds")
-                        
                         # Get recent trades - only for monitored markets
                         recent_trades = self.data_api.get_recent_trades(market_ids, limit=100)
-                        
-                        if self.debug_mode:
-                            logger.info(f"📡 Data API returned {len(recent_trades)} total trades")
                         
                         # Filter for trades newer than last poll
                         new_trades = []
@@ -478,11 +471,16 @@ class MarketMonitor:
                                 new_trades.append(trade)
                         
                         if self.debug_mode:
-                            logger.info(f"🆕 Found {len(new_trades)} trades newer than {last_poll_time.strftime('%H:%M:%S')}")
+                            newest_info = ""
                             if new_trades:
                                 newest_trade = max(new_trades, key=lambda t: t.get('timestamp', 0))
                                 newest_time = datetime.fromtimestamp(newest_trade.get('timestamp', 0))
-                                logger.info(f"📈 Newest trade: {newest_time.strftime('%H:%M:%S')} - ${newest_trade.get('size', 0):.2f} @ {newest_trade.get('price', 0):.3f}")
+                                newest_info = f", newest: ${newest_trade.get('size', 0):.0f} @ {newest_trade.get('price', 0):.3f}"
+                            logger.info(f"🔄 Poll #{poll_count}: {len(market_ids)} markets, {len(recent_trades)} API trades, {len(new_trades)} new{newest_info}")
+                        
+                        # Only show this if we actually found new trades
+                        if new_trades and not self.debug_mode:
+                            print(f"🔄 TRADE POLLING: Found {len(new_trades)} new trades")
                         
                         # Process new trades
                         for trade in new_trades:
@@ -560,13 +558,7 @@ class MarketMonitor:
             except Exception as e:
                 logger.error(f"Error analyzing market {market_id}: {e}")
         
-        # Summary log for this analysis round
-        if self.debug_mode or self.show_normal_activity or alerts_this_round > 0:
-            alert_color = Fore.RED if alerts_this_round > 0 else Fore.GREEN
-            status_emoji = "🚨" if alerts_this_round > 0 else "✅"
-            print(f"{Fore.CYAN}{status_emoji} {Style.BRIGHT}Analysis #{self.analysis_count} Complete{Style.RESET_ALL}")
-            print(f"   {alert_color}{alerts_this_round}{Style.RESET_ALL} alerts from {Fore.BLUE}{markets_with_data}{Style.RESET_ALL} markets with data")
-            
+        # Track alerts for system status
         if alerts_this_round > 0:
             self.alerts_generated += alerts_this_round
     
