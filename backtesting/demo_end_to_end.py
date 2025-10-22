@@ -121,7 +121,8 @@ class BacktestingDemo:
         self,
         detector_names: List[str] = None,
         limit: int = 10000,
-        batch_mode: bool = False
+        batch_mode: bool = False,
+        outcome_threshold: float = 0.05
     ):
         """Step 2: Run simulation with detectors"""
         self.print_header("STEP 2: Running Detection Simulation")
@@ -200,25 +201,33 @@ class BacktestingDemo:
         if not detectors:
             print("  ⚠️  No detectors available, running simulation without detection")
 
-        # Create simulation engine
-        self.engine = SimulationEngine(config=config, detectors=detectors)
+        # Open storage for simulation (will be used for price lookups)
+        self.storage = HistoricalTradeStorage(self.db_path)
+
+        # Create simulation engine with storage and threshold
+        self.engine = SimulationEngine(
+            config=config,
+            detectors=detectors,
+            outcome_price_threshold=outcome_threshold,
+            storage=self.storage
+        )
 
         # Load trades from database
         print(f"\n📖 Loading trades from database...")
-        with HistoricalTradeStorage(self.db_path) as storage:
-            time_range = storage.get_time_range()
+        time_range = self.storage.get_time_range()
 
-            if not time_range:
-                print("❌ No trades found in database. Run step 1 first.")
-                sys.exit(1)
+        if not time_range:
+            print("❌ No trades found in database. Run step 1 first.")
+            self.storage.close()
+            sys.exit(1)
 
-            trades = storage.get_trades_by_time_range(
-                start_timestamp=time_range[0],
-                end_timestamp=time_range[1],
-                limit=limit
-            )
+        trades = self.storage.get_trades_by_time_range(
+            start_timestamp=time_range[0],
+            end_timestamp=time_range[1],
+            limit=limit
+        )
 
-            print(f"  Loaded {len(trades):,} trades for simulation")
+        print(f"  Loaded {len(trades):,} trades for simulation")
 
         # Enhanced progress callback with ETA
         start_time = datetime.now()
@@ -435,7 +444,8 @@ class BacktestingDemo:
         limit: int = 10000,
         detectors: List[str] = None,
         batch_mode: bool = False,
-        skip_prompt: bool = False
+        skip_prompt: bool = False,
+        outcome_threshold: float = 0.05
     ):
         """Run complete end-to-end demo"""
         self.print_header("🎬 Polymarket Backtesting Framework - End-to-End Demo")
@@ -454,7 +464,8 @@ class BacktestingDemo:
             self.step_2_run_simulation(
                 detector_names=detectors,
                 limit=limit,
-                batch_mode=batch_mode
+                batch_mode=batch_mode,
+                outcome_threshold=outcome_threshold
             )
 
             # Step 3: Analyze results
@@ -539,6 +550,13 @@ def main():
         help='Enable debug logging'
     )
 
+    parser.add_argument(
+        '--outcome-threshold',
+        type=float,
+        default=0.05,
+        help='Price change threshold for outcome validation as decimal (default: 0.05 = 5%%)'
+    )
+
     args = parser.parse_args()
 
     # Setup logging
@@ -554,7 +572,8 @@ def main():
         limit=args.limit,
         detectors=args.detectors,
         batch_mode=args.batch,
-        skip_prompt=args.yes
+        skip_prompt=args.yes,
+        outcome_threshold=args.outcome_threshold
     )
 
 

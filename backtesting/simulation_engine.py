@@ -85,7 +85,9 @@ class SimulationEngine:
         self,
         config: Dict,
         detectors: Optional[Dict] = None,
-        track_outcomes: bool = True
+        track_outcomes: bool = True,
+        outcome_price_threshold: float = 0.05,
+        storage: Optional['HistoricalTradeStorage'] = None
     ):
         """
         Initialize simulation engine.
@@ -95,9 +97,12 @@ class SimulationEngine:
             detectors: Optional dict of detector instances
                       Format: {'volume': VolumeDetector(...), ...}
             track_outcomes: Whether to track alert outcomes for metrics (default: True)
+            outcome_price_threshold: Price change threshold for outcome validation (default: 5%)
+            storage: Optional HistoricalTradeStorage for database queries
         """
         self.config = config
         self.detectors = detectors or {}
+        self.storage = storage
 
         # Simulation state
         self.market_states: Dict[str, MarketState] = {}
@@ -120,7 +125,7 @@ class SimulationEngine:
             from backtesting.outcome_tracker import OutcomeTracker
             from backtesting.metrics_calculator import MetricsCalculator
 
-            self.outcome_tracker = OutcomeTracker()
+            self.outcome_tracker = OutcomeTracker(price_change_threshold=outcome_price_threshold)
             self.metrics_calculator = MetricsCalculator()
 
         logger.info("🎬 Simulation engine initialized")
@@ -158,6 +163,11 @@ class SimulationEngine:
         # Use average of maker/taker amounts as trade volume
         volume_usd = (maker_amount + taker_amount) / 2 / 1e6
 
+        # Determine side based on relative amounts
+        # In Polymarket, the side isn't explicit but we can infer from asset directions
+        # For now, default to BUY (doesn't affect volume-based detection)
+        side = 'BUY'
+
         return {
             'id': trade['id'],
             'timestamp': trade['timestamp'],
@@ -168,6 +178,7 @@ class SimulationEngine:
             'size': maker_amount,  # Use maker amount as size
             'price': 0.5,  # Default price (we don't have this in orderbook data)
             'volume_usd': volume_usd,
+            'side': side,  # Add side field for detector compatibility
             'fee': int(trade.get('fee', 0)) / 1e6,
             'transactionHash': trade.get('transaction_hash', ''),
         }
@@ -223,7 +234,7 @@ class SimulationEngine:
                     continue
 
                 # Check if detection triggered
-                if result and result.get('detected', False):
+                if result and result.get('anomaly', False):
                     alert = VirtualAlert(
                         alert_id=f"sim_{market_id}_{detector_name}_{len(self.virtual_alerts)}",
                         timestamp=self.current_time,
@@ -519,7 +530,11 @@ class SimulationEngine:
             # Calculate prices at intervals
             for hours in interval_hours:
                 target_time = alert.timestamp + timedelta(hours=hours)
-                price = self._estimate_price_at_time(market_state, target_time)
+                price = self._estimate_price_at_time(
+                    market_state,
+                    target_time,
+                    storage=self.storage  # Pass storage for database queries
+                )
 
                 if price is not None:
                     interval_key = f"{hours}h"
@@ -535,42 +550,64 @@ class SimulationEngine:
     def _estimate_price_at_time(
         self,
         market_state: MarketState,
-        target_time: datetime
+        target_time: datetime,
+        storage: Optional['HistoricalTradeStorage'] = None
     ) -> Optional[float]:
         """
         Estimate market price at a specific time from trade history.
 
-        Uses nearest trade or interpolates between trades.
+        First tries market's own trade history, then queries database for
+        any trades near target time if storage is provided.
 
         Args:
             market_state: Market state with trade history
             target_time: Time to estimate price for
+            storage: Optional historical storage for database queries
 
         Returns:
             Estimated price or None if not enough data
         """
-        if not market_state.trade_history:
-            return None
-
         target_ts = target_time.timestamp()
 
-        # Find trades around target time
-        trades_before = [
-            t for t in market_state.trade_history
-            if t['timestamp'] <= target_ts
-        ]
-        trades_after = [
-            t for t in market_state.trade_history
-            if t['timestamp'] > target_ts
-        ]
+        # First try: Check market's own trade history
+        if market_state.trade_history:
+            trades_before = [
+                t for t in market_state.trade_history
+                if t['timestamp'] <= target_ts
+            ]
+            trades_after = [
+                t for t in market_state.trade_history
+                if t['timestamp'] > target_ts
+            ]
 
-        # If we have exact or nearby trades, use price
-        if trades_after and len(trades_after) > 0:
-            return trades_after[0]['price']
-        elif trades_before and len(trades_before) > 0:
-            return trades_before[-1]['price']
+            # If we have exact or nearby trades, use price
+            if trades_after and len(trades_after) > 0:
+                return trades_after[0]['price']
+            elif trades_before and len(trades_before) > 0:
+                return trades_before[-1]['price']
 
-        # Default to 0.5 if no data
+        # Second try: Query database for ANY trades near target time
+        if storage:
+            try:
+                # Query trades within ±5 min window of target time across all markets
+                window_start = target_time - timedelta(minutes=5)
+                window_end = target_time + timedelta(minutes=5)
+
+                nearby_trades = storage.get_trades_by_time_range(
+                    start_timestamp=int(window_start.timestamp()),
+                    end_timestamp=int(window_end.timestamp()),
+                    limit=10
+                )
+
+                if nearby_trades:
+                    # Use most recent trade's price
+                    logger.debug(f"Found {len(nearby_trades)} trades near {target_time} from database")
+                    return nearby_trades[-1].get('price', 0.5)
+            except Exception as e:
+                logger.debug(f"Could not query storage for price at {target_time}: {e}")
+
+        # Last resort: Default to 0.5 (midpoint for binary markets)
+        logger.debug(f"No price data found for {target_time}, using default 0.5")
         return 0.5
 
     def calculate_metrics(
@@ -644,6 +681,24 @@ class SimulationEngine:
 
     def export_alerts_to_json(self, filepath: str):
         """Export virtual alerts to JSON file"""
+        import numpy as np
+
+        def convert_numpy_types(obj):
+            """Recursively convert numpy types to native Python types"""
+            if isinstance(obj, np.bool_):
+                return bool(obj)
+            elif isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {key: convert_numpy_types(value) for key, value in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [convert_numpy_types(item) for item in obj]
+            return obj
+
         alerts_data = [
             {
                 'alert_id': alert.alert_id,
@@ -654,7 +709,7 @@ class SimulationEngine:
                 'confidence_score': alert.confidence_score,
                 'price_at_alert': alert.price_at_alert,
                 'predicted_direction': alert.predicted_direction,
-                'analysis': alert.analysis
+                'analysis': convert_numpy_types(alert.analysis)
             }
             for alert in self.virtual_alerts
         ]

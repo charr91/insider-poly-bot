@@ -15,6 +15,8 @@ from .outcome_tracker import (
     OutcomeResult
 )
 from .metrics_calculator import MetricsCalculator, PerformanceMetrics
+from .config_variant import ConfigurationVariant, VariantGenerator, merge_configs
+from .config_tester import ConfigurationTester, TestResult, ComparisonResult
 
 __all__ = [
     'PolymarketGraphClient',
@@ -28,5 +30,11 @@ __all__ = [
     'OutcomeDirection',
     'OutcomeResult',
     'MetricsCalculator',
-    'PerformanceMetrics'
+    'PerformanceMetrics',
+    'ConfigurationVariant',
+    'VariantGenerator',
+    'merge_configs',
+    'ConfigurationTester',
+    'TestResult',
+    'ComparisonResult'
 ]

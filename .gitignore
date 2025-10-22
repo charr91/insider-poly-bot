@@ -87,6 +87,7 @@ tasks.json
 
 # Backtesting data and results
 *.db
+insider_data.db
 demo_backtest.db
 insider_data.db
 backtesting/results/

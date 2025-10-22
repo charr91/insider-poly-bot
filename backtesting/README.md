@@ -22,6 +22,9 @@ python backtesting/demo_end_to_end.py --days 30 --limit 50000
 # Use specific detectors
 python backtesting/demo_end_to_end.py --detectors volume whale price
 
+# Adjust price validation threshold for binary markets (default: 5%)
+python backtesting/demo_end_to_end.py --outcome-threshold 0.02
+
 # See all options
 python backtesting/demo_end_to_end.py --help
 ```
@@ -30,7 +33,8 @@ python backtesting/demo_end_to_end.py --help
 1. Fetches real historical trades from The Graph (free, no API key needed)
 2. Runs simulation through your detection algorithms
 3. Shows detailed alert analysis with confidence scores
-4. Exports results to JSON for further analysis
+4. Validates alert accuracy by tracking price movements after alerts
+5. Exports results to JSON for further analysis
 
 **First run takes 1-5 minutes** to download data. Subsequent runs are instant if using existing database.
 
@@ -297,6 +301,44 @@ print(f"Accuracy: {metrics['accuracy']:.2%}")
 print(f"Win Rate: {metrics['win_rate']:.2%}")
 ```
 
+**Price Validation Configuration:**
+
+The outcome tracker uses a configurable price change threshold to classify price movements:
+
+- **Default threshold: 5%** - Price must move ±5% to be classified as UP/DOWN
+- **Below threshold: FLAT** - Movements under threshold are considered no significant change
+- **For binary markets: 2-3%** recommended - Polymarket binary markets have smaller price ranges
+
+```python
+# More sensitive for binary markets
+tracker = OutcomeTracker(price_change_threshold=0.02)  # 2%
+
+# Conservative for higher volatility
+tracker = OutcomeTracker(price_change_threshold=0.10)  # 10%
+```
+
+**Price Data Sources:**
+
+The system queries price data from two sources in priority order:
+
+1. **Market's own trade history** - Prices from the alerted market
+2. **Database historical trades** - Any trades near target time from all markets
+
+This ensures accurate validation even when a specific market has low trading activity after an alert.
+
+**CLI Usage:**
+
+```bash
+# Default 5% threshold
+python backtesting/demo_end_to_end.py
+
+# Lower threshold for binary markets
+python backtesting/demo_end_to_end.py --outcome-threshold 0.02
+
+# Higher threshold for volatile markets
+python backtesting/demo_end_to_end.py --outcome-threshold 0.10
+```
+
 ### 6. Metrics Calculator (`metrics_calculator.py`)
 
 Calculates comprehensive performance metrics from alert outcomes.
@@ -518,13 +560,158 @@ python backtesting/data_loader.py
 # - Display statistics
 ```
 
+### 7. Configuration Variant (`config_variant.py`)
+
+Defines and generates configuration variants for A/B testing detector parameters.
+
+**Features:**
+- Define configuration variants with parameter overrides
+- Generate systematic parameter sweeps
+- Grid search across multiple parameters
+- Predefined variant templates (baseline, aggressive, conservative)
+- Export/import variants to JSON
+
+**Usage:**
+```python
+from backtesting import ConfigurationVariant, VariantGenerator
+from config.settings import Settings
+
+# Create base configuration
+settings = Settings()
+base_config = {
+    'whale_thresholds': {
+        'whale_threshold_usd': settings.detection.whale_threshold_usd,
+        'coordination_threshold': settings.detection.coordination_threshold
+    },
+    'volume_thresholds': {
+        'volume_spike_multiplier': settings.detection.volume_spike_multiplier,
+        'z_score_threshold': settings.detection.z_score_threshold
+    }
+}
+
+generator = VariantGenerator(base_config)
+
+# Generate named presets
+variants = generator.create_named_variants()
+# Returns: baseline, aggressive, conservative, balanced
+
+# Parameter sweep
+whale_sweep = generator.sweep_parameter(
+    param_path='whale_thresholds.whale_threshold_usd',
+    values=[5000, 10000, 15000, 20000],
+    name_template="whale_{value}",
+    description_template="Whale threshold = ${value:,}"
+)
+
+# Grid search
+grid_variants = generator.grid_search(
+    param_grid={
+        'volume_thresholds.volume_spike_multiplier': [2.0, 3.0, 4.0],
+        'volume_thresholds.z_score_threshold': [2.0, 2.5, 3.0]
+    },
+    name_template="volume_grid_{index}"
+)
+
+# Export for later use
+generator.export_variants(variants, "my_variants.json")
+
+# Load variants
+base_config, variants = VariantGenerator.load_variants("my_variants.json")
+```
+
+### 8. Configuration Tester (`config_tester.py`)
+
+A/B testing framework for systematically comparing detector configurations.
+
+**Features:**
+- Run simulations with multiple configurations
+- Statistical comparison of performance metrics
+- Ranking by precision, recall, F1, ROI, Sharpe ratio
+- Detailed comparison reports
+- Best configuration recommendation
+- Export results to JSON
+
+**Usage:**
+```python
+from backtesting import ConfigurationTester, VariantGenerator
+
+# Initialize tester with historical data
+tester = ConfigurationTester(
+    db_path="backtest.db",
+    interval='24h',
+    interval_hours=[1, 4, 24]
+)
+
+# Create variants to test
+generator = VariantGenerator(base_config)
+variants = generator.create_named_variants()
+
+# Add variants to tester
+for variant in variants:
+    tester.add_variant(variant)
+
+# Run A/B tests
+results = tester.run_tests(
+    days_back=30,
+    batch_mode=True,
+    progress_callback=lambda name, cur, total: print(f"Testing {name}...")
+)
+
+# Compare results
+comparison = tester.compare_results(
+    rank_by='f1_score',  # Can use: precision, recall, roi, sharpe_ratio
+    min_alerts=5  # Require minimum alerts for valid comparison
+)
+
+# Print detailed comparison report
+tester.print_comparison_report(comparison)
+
+# Get best configuration
+best_config = tester.get_best_config(rank_by='f1_score')
+print(f"Best: {best_config.name}")
+
+# Export results
+tester.export_results("config_test_results.json")
+tester.export_comparison(comparison, "config_comparison.json")
+```
+
+**Quick Start:**
+```bash
+# Test configuration framework (no data required)
+python backtesting/test_config_tester.py
+
+# Run full A/B testing demo (requires historical data)
+python backtesting/demo_config_testing.py
+
+# Run with specific database
+python backtesting/demo_config_testing.py --db my_backtest.db --days 30
+```
+
+**What the demo does:**
+1. Creates multiple detector configuration variants
+   - Named presets (baseline, aggressive, conservative, balanced)
+   - Whale threshold sweep (5K, 7.5K, 10K, 15K, 20K)
+   - Volume parameter grid search
+2. Runs simulations with each configuration
+3. Compares performance metrics across all variants
+4. Identifies best-performing configuration
+5. Exports detailed results and recommendations
+
+**Ranking Metrics:**
+- `f1_score` - Balanced precision/recall (recommended)
+- `precision` - Minimize false alarms
+- `recall` - Maximize detection coverage
+- `roi` - Maximize profitability
+- `sharpe_ratio` - Best risk-adjusted returns
+- `win_rate` - Most consistent wins
+
 ## Next Steps
 
 Core infrastructure complete! Next components to build:
 
 1. ✅ **Simulation Engine** - COMPLETE
-2. **Metrics Collector** - Calculate precision, recall, F1, ROI
-3. **Configuration Tester** - A/B test detector parameters
+2. ✅ **Metrics Collector** - COMPLETE (Calculate precision, recall, F1, ROI)
+3. ✅ **Configuration Tester** - COMPLETE (A/B test detector parameters)
 4. **Report Generator** - Performance visualization and analysis
 
 ## Architecture
