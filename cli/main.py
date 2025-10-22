@@ -12,6 +12,7 @@ import click
 import asyncio
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Import command groups
 from cli.commands.whale_commands import whales
@@ -50,6 +51,9 @@ async def _run_async(config_path, db_path):
     """Async implementation of run command"""
     from market_monitor import MarketMonitor
     import logging
+
+    # Load environment variables from .env file
+    load_dotenv()
 
     # Setup logging
     logging.basicConfig(
