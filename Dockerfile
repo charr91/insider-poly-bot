@@ -40,7 +40,7 @@ ENV PATH=/root/.local/bin:$PATH
 COPY . .
 
 # Create directories for persistent data
-RUN mkdir -p /app/data /app/logs
+RUN mkdir -p /app/data/logs
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \

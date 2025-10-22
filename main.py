@@ -23,12 +23,17 @@ sys.path.insert(0, str(Path(__file__).parent))
 from market_monitor import MarketMonitor
 
 # Configure logging
+# Use data directory for logs when it exists (Docker), otherwise current directory
+log_dir = Path('data/logs')
+log_dir.mkdir(parents=True, exist_ok=True)
+log_file = log_dir / 'insider_bot.log'
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('insider_bot.log')
+        logging.FileHandler(log_file)
     ]
 )
 
@@ -55,7 +60,8 @@ async def main():
     print(f"{Fore.BLUE}{'='*80}{Style.RESET_ALL}\n")
     
     # Initialize market monitor
-    monitor = MarketMonitor("insider_config.json")
+    # Use data directory for database (works both in Docker and locally)
+    monitor = MarketMonitor("insider_config.json", db_path="data/insider_data.db")
     
     # Log configuration summary in a nice format
     config_summary = monitor.settings.get_config_summary()

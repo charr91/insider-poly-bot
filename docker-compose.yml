@@ -12,10 +12,8 @@ services:
 
     # Volume mounts for data persistence
     volumes:
-      # Database persistence
-      - ./insider_data.db:/app/insider_data.db
-      # Logs persistence
-      - ./logs:/app/logs
+      # Data directory for database and logs
+      - ./data:/app/data
       # Config file (can be customized per environment)
       - ./insider_config.json:/app/insider_config.json:ro
 
