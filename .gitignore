@@ -63,6 +63,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+.coverage
+coverage.xml
 
 logs
 npm-debug.log*

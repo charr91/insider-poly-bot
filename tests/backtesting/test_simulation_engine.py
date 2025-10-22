@@ -325,7 +325,7 @@ class TestSimulationEngine:
         """Test simulation with detector that doesn't detect anything"""
         # Configure detector to not detect
         mock_detector.analyze_volume_pattern.return_value = {
-            'detected': False
+            'anomaly': False
         }
 
         engine = SimulationEngine(config=sample_config)
@@ -347,7 +347,7 @@ class TestSimulationEngine:
         """Test simulation with detector that generates alerts"""
         # Configure detector to detect on every call
         mock_detector.analyze_volume_pattern.return_value = {
-            'detected': True,
+            'anomaly': True,
             'severity': 'HIGH',
             'confidence_score': 0.85,
             'volume_spike': 5.2,
@@ -375,13 +375,13 @@ class TestSimulationEngine:
         whale_detector = Mock()
 
         volume_detector.analyze_volume_pattern.return_value = {
-            'detected': True,
+            'anomaly': True,
             'severity': 'HIGH',
             'confidence_score': 0.8
         }
 
         whale_detector.detect_whale_activity.return_value = {
-            'detected': True,
+            'anomaly': True,
             'severity': 'MEDIUM',
             'confidence_score': 0.7
         }
@@ -646,7 +646,7 @@ class TestSimulationEngine:
         """Test simulation with trades from multiple markets"""
         # Configure detector
         mock_detector.analyze_volume_pattern.return_value = {
-            'detected': False
+            'anomaly': False
         }
 
         engine = SimulationEngine(config=sample_config)
