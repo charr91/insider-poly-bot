@@ -5,13 +5,16 @@ Replays historical trades through detection algorithms to measure performance.
 """
 
 import logging
-from typing import Dict, List, Optional, Callable, Tuple
+from typing import Dict, List, Optional, Callable, Tuple, TYPE_CHECKING
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 import json
 import sys
 from pathlib import Path
+
+if TYPE_CHECKING:
+    from backtesting.historical_storage import HistoricalTradeStorage
 
 # Add parent directory to path for direct execution
 if __name__ == "__main__":
@@ -87,7 +90,7 @@ class SimulationEngine:
         detectors: Optional[Dict] = None,
         track_outcomes: bool = True,
         outcome_price_threshold: float = 0.05,
-        storage: Optional['HistoricalTradeStorage'] = None
+        storage: Optional[HistoricalTradeStorage] = None
     ):
         """
         Initialize simulation engine.
@@ -551,7 +554,7 @@ class SimulationEngine:
         self,
         market_state: MarketState,
         target_time: datetime,
-        storage: Optional['HistoricalTradeStorage'] = None
+        storage: Optional[HistoricalTradeStorage] = None
     ) -> Optional[float]:
         """
         Estimate market price at a specific time from trade history.

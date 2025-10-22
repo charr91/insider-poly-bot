@@ -141,7 +141,7 @@ class VariantGenerator:
         # Default templates
         if name_template is None:
             param_name = param_path.split('.')[-1]
-            name_template = f"{param_name}_{{{value}}}"
+            name_template = f"{param_name}_" + "{value}"
 
         if description_template is None:
             description_template = f"Sweep {param_path} = {{value}}"
