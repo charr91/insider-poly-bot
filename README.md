@@ -269,6 +269,186 @@ This bot is for **educational and research purposes only**. It is designed to de
 
 ---
 
+## 💾 Database & Persistence
+
+The bot now includes a robust database persistence layer for tracking alerts, whale addresses, and alert outcomes.
+
+### Database Features
+
+- **Alert Storage**: All alerts are automatically saved to SQLite database
+- **Whale Tracking**: Tracks whale addresses with automatic market maker detection
+- **Outcome Correlation**: Tracks alert outcomes (price movements at 1h, 4h, 24h intervals)
+- **Performance Analytics**: Calculate win rates and profitability of alerts
+
+### Market Maker Detection
+
+The bot uses a sophisticated heuristic algorithm to automatically identify market makers:
+
+- **Frequency Analysis** (30 points): High-frequency trading patterns
+- **Balance Analysis** (40 points): Buy/sell volume balance (targets 50/50)
+- **Diversity Analysis** (20 points): Number of unique markets traded
+- **Consistency Analysis** (10 points): Days active in the system
+
+**Classification**: Score ≥70 = Market Maker (excluded from whale tracking)
+
+### Database Schema
+
+```
+alerts                     # All generated alerts
+├── id
+├── market_id
+├── alert_type
+├── severity
+├── timestamp
+├── analysis (JSON)
+└── confidence_score
+
+alert_outcomes            # Performance tracking
+├── alert_id (FK)
+├── price_at_alert
+├── price_1h/4h/24h_after
+├── predicted_direction
+├── was_profitable
+└── market_resolution
+
+whale_addresses          # Tracked whales
+├── address
+├── total_volume_usd
+├── trade_count
+├── buy/sell_volume_usd
+├── is_market_maker
+├── market_maker_score
+└── tags (JSON)
+
+whale_alert_associations # Links whales to alerts
+├── whale_id (FK)
+├── alert_id (FK)
+├── whale_volume_in_alert
+└── whale_role
+```
+
+## 🖥️ CLI Usage
+
+The bot includes a comprehensive CLI for querying tracked data.
+
+### Installation
+
+```bash
+# Install the package
+pip install -e .
+
+# Verify installation
+insider-bot --help
+```
+
+### Running the Bot
+
+```bash
+# Start the monitoring bot
+insider-bot run
+
+# Use custom configuration
+insider-bot run --config my_config.json
+
+# Use custom database path
+insider-bot --db-path /path/to/data.db run
+```
+
+### Whale Commands
+
+```bash
+# List all tracked whales (excluding market makers)
+insider-bot whales list --limit 20 --exclude-mm
+
+# Show specific whale details
+insider-bot whales show 0x1234567890abcdef...
+
+# Quick top whales summary
+insider-bot whales top --limit 10
+
+# Include market makers
+insider-bot whales list --limit 50 --no-exclude-mm
+
+# Filter by minimum volume
+insider-bot whales list --min-volume 50000
+```
+
+### Alert Commands
+
+```bash
+# Show recent alerts (last 24 hours)
+insider-bot alerts recent --hours 24
+
+# Filter by severity
+insider-bot alerts recent --severity HIGH
+
+# Show specific alert details
+insider-bot alerts show 123
+
+# Get all alerts for a market
+insider-bot alerts by-market <market-id>
+```
+
+### Statistics Commands
+
+```bash
+# View alert performance statistics
+insider-bot stats performance --days 30
+
+# System summary
+insider-bot stats summary
+
+# Whale statistics
+insider-bot stats whales
+```
+
+### Example CLI Session
+
+```bash
+# Check top whales
+$ insider-bot whales top --limit 5
+
+Top 5 Whales by Volume
+
+ 1. 0x1a2b3c4d...5e6f  $   125,000  (45 trades)
+ 2. 0x9f8e7d6c...5b4a  $    98,500  (32 trades)
+ 3. 0x3c4d5e6f...7a8b  $    87,300  (28 trades)
+ 4. 0x6f7a8b9c...0d1e  $    76,200  (41 trades)
+ 5. 0x2b3c4d5e...6f7a  $    65,800  (19 trades)
+
+# Check performance
+$ insider-bot stats performance --days 7
+
+┌─────────────────────────────────────┐
+│  📊 Alert Performance (7d)          │
+├─────────────────────────────────────┤
+│ Period: Last 7 days                 │
+│                                     │
+│ Alert Outcomes:                     │
+│   Total Alerts: 24                  │
+│   Profitable: 16 (66.7%)            │
+│   Unprofitable: 8                   │
+│                                     │
+│ Profitability Metrics:              │
+│   Win Rate: 66.7%                   │
+│   Avg Profit: +3.45%                │
+│                                     │
+│ Overall Status: ✅ Excellent        │
+└─────────────────────────────────────┘
+
+# View recent high-severity alerts
+$ insider-bot alerts recent --severity HIGH --hours 12
+
+┌────────────────────────────────────────────────┐
+│              Recent Alerts (Last 12h)          │
+├────┬──────────┬──────────────┬──────┬─────────┤
+│ ID │   Time   │   Market     │ Type │Severity │
+├────┼──────────┼──────────────┼──────┼─────────┤
+│ 42 │ 01/15... │ Will Trump...│WHALE │🟠 HIGH  │
+│ 41 │ 01/15... │ Bitcoin to...│COORD │🟠 HIGH  │
+└────┴──────────┴──────────────┴──────┴─────────┘
+```
+
 ## 📖 Documentation Navigation
 
 | **Getting Started** | **Configuration** | **Operations** | **Development** | **Support** |
@@ -279,6 +459,7 @@ This bot is for **educational and research purposes only**. It is designed to de
 
 ### Quick Reference
 - **First time setup**: [Installation](#-installation) → [Configuration](CONFIGURATION.md) → [Quick Start](#-quick-start)
+- **Database & CLI**: [Database Features](#-database--persistence) → [CLI Usage](#-cli-usage)
 - **Customization**: [Configuration Guide](CONFIGURATION.md) → [Usage Examples](USAGE.md)
 - **Development**: [Testing Guide](TESTING.md) → [Writing Tests](TESTING.md#-writing-new-tests)
 - **Issues**: [Troubleshooting](TROUBLESHOOTING.md) → [FAQ](TROUBLESHOOTING.md#-frequently-asked-questions)

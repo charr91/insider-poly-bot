@@ -255,3 +255,49 @@ class CoordinationConstants:
     DEFAULT_COORDINATION_TIME_WINDOW = 30
     DEFAULT_DIRECTIONAL_BIAS_THRESHOLD = 0.8
     DEFAULT_BURST_INTENSITY_THRESHOLD = 3.0
+
+
+class MarketMakerThresholds:
+    """
+    Market maker detection heuristic thresholds.
+
+    Used for identifying market makers based on trading patterns:
+    - High frequency trading
+    - Balanced buy/sell ratio
+    - Multiple markets
+    - Consistent activity over time
+    """
+    # Trade frequency thresholds
+    HIGH_FREQUENCY_TRADES = 100
+    MEDIUM_FREQUENCY_TRADES = 50
+    LOW_FREQUENCY_TRADES = 25
+
+    # Buy/sell ratio balance thresholds (0.0 to 1.0)
+    TIGHT_RATIO_MIN = 0.45  # Within 5% of 50/50
+    TIGHT_RATIO_MAX = 0.55
+    LOOSE_RATIO_MIN = 0.40  # Within 10% of 50/50
+    LOOSE_RATIO_MAX = 0.60
+
+    # Market diversity thresholds
+    MANY_MARKETS = 10
+    SEVERAL_MARKETS = 5
+
+    # Time consistency thresholds (days)
+    LONG_ACTIVITY_DAYS = 7
+    MEDIUM_ACTIVITY_DAYS = 3
+
+    # Classification threshold (0-100)
+    MM_CLASSIFICATION_THRESHOLD = 70  # Score >= 70 indicates likely MM
+
+    # Scoring weights (total = 100)
+    FREQUENCY_WEIGHT_MAX = 30
+    BALANCE_WEIGHT_MAX = 40
+    DIVERSITY_WEIGHT_MAX = 20
+    CONSISTENCY_WEIGHT_MAX = 10
+
+
+class WhaleRole:
+    """Roles for whale-alert associations"""
+    PRIMARY_ACTOR = "PRIMARY_ACTOR"  # Main whale driving the activity
+    COORDINATOR = "COORDINATOR"  # Whale coordinating with others
+    PARTICIPANT = "PARTICIPANT"  # Whale participating in coordinated activity

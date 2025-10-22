@@ -4,7 +4,7 @@ Common utilities, enums, and data structures for the insider trading detection s
 
 from .enums import (
     AlertType,
-    AlertSeverity, 
+    AlertSeverity,
     BaselineType,
     MarketStatus,
     DetectorStatus,
@@ -17,13 +17,15 @@ from .enums import (
     VolumeConstants,
     WhaleConstants,
     PriceConstants,
-    CoordinationConstants
+    CoordinationConstants,
+    MarketMakerThresholds,
+    WhaleRole
 )
 
 __all__ = [
     'AlertType',
     'AlertSeverity',
-    'BaselineType', 
+    'BaselineType',
     'MarketStatus',
     'DetectorStatus',
     'AlertMetadata',
@@ -33,7 +35,9 @@ __all__ = [
     'ConfidenceThresholds',
     'TimeConstants',
     'VolumeConstants',
-    'WhaleConstants', 
+    'WhaleConstants',
     'PriceConstants',
-    'CoordinationConstants'
+    'CoordinationConstants',
+    'MarketMakerThresholds',
+    'WhaleRole'
 ]

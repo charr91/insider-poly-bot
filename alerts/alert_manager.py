@@ -6,7 +6,7 @@ Handles sending alerts through various channels (Discord, console, etc.)
 import asyncio
 import aiohttp
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Union, Protocol
 from enum import Enum
 import os
@@ -17,72 +17,80 @@ logger = logging.getLogger(__name__)
 
 class AlertStorage(Protocol):
     """Protocol for alert storage backends"""
-    
+
     @abstractmethod
-    def save_alert(self, alert_record: Dict) -> None:
+    async def save_alert(self, alert_record: Dict) -> None:
         """Save an alert record to storage"""
         pass
-    
-    @abstractmethod  
-    def get_recent_alerts(self, hours: int = 24) -> List[Dict]:
+
+    @abstractmethod
+    async def get_recent_alerts(self, hours: int = 24) -> List[Dict]:
         """Get alerts from the last N hours"""
         pass
-    
+
     @abstractmethod
-    def should_send_alert(self, alert: Dict, max_per_hour: int, duplicate_window_minutes: int = 10) -> bool:
+    async def should_send_alert(self, alert: Dict, max_per_hour: int, duplicate_window_minutes: int = 10) -> bool:
         """Check if alert should be sent based on rate limiting and deduplication"""
         pass
-    
+
     @abstractmethod
-    def clear_old_alerts(self, max_age_hours: int = 48) -> None:
+    async def clear_old_alerts(self, max_age_hours: int = 48) -> None:
         """Remove alerts older than specified hours"""
         pass
 
 class MemoryAlertStorage:
     """In-memory alert storage (current default behavior)"""
-    
+
     def __init__(self):
         self.alert_history: List[Dict] = []
-    
-    def save_alert(self, alert_record: Dict) -> None:
+
+    async def save_alert(self, alert_record: Dict) -> None:
         """Save alert record to in-memory storage"""
         self.alert_history.append(alert_record)
-    
-    def get_recent_alerts(self, hours: int = 24) -> List[Dict]:
+
+    async def get_recent_alerts(self, hours: int = 24) -> List[Dict]:
         """Get alerts from the last N hours"""
         cutoff_time = datetime.now().timestamp() - (hours * 3600)
         return [
             alert for alert in self.alert_history
             if alert['timestamp'].timestamp() > cutoff_time
         ]
-    
-    def should_send_alert(self, alert: Dict, max_per_hour: int, duplicate_window_minutes: int = 10) -> bool:
+
+    async def should_send_alert(self, alert: Dict, max_per_hour: int, duplicate_window_minutes: int = 10) -> bool:
         """Check rate limiting and deduplication"""
-        now = datetime.now()
-        
+        now = datetime.now(timezone.utc)
+
         # Rate limiting - count recent alerts
-        recent_alerts = [
-            a for a in self.alert_history 
-            if (now - a['timestamp']).total_seconds() < 3600  # Last hour
-        ]
-        
+        recent_alerts = []
+        for a in self.alert_history:
+            ts = a['timestamp']
+            # Ensure timezone-aware comparison
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if (now - ts).total_seconds() < 3600:  # Last hour
+                recent_alerts.append(a)
+
         if len(recent_alerts) >= max_per_hour:
             return False
-        
+
         # Deduplication - check for same market/type in recent window
         market_id = alert.get('market_id')
         alert_type = alert.get('alert_type')
         duplicate_window = duplicate_window_minutes * 60
-        
+
         for hist_alert in self.alert_history:
-            if (hist_alert['market_id'] == market_id and 
+            ts = hist_alert['timestamp']
+            # Ensure timezone-aware comparison
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if (hist_alert['market_id'] == market_id and
                 hist_alert['alert_type'] == alert_type and
-                (now - hist_alert['timestamp']).total_seconds() < duplicate_window):
+                (now - ts).total_seconds() < duplicate_window):
                 return False
-        
+
         return True
-    
-    def clear_old_alerts(self, max_age_hours: int = 48) -> None:
+
+    async def clear_old_alerts(self, max_age_hours: int = 48) -> None:
         """Remove alerts older than specified hours"""
         cutoff_time = datetime.now().timestamp() - (max_age_hours * 3600)
         self.alert_history = [
@@ -133,9 +141,9 @@ class AlertManager:
             if alert_severity_level < self.min_severity_level:
                 logger.debug(f"Skipping alert - severity {alert.get('severity')} below threshold {self.min_severity}")
                 return False
-            
+
             # Rate limiting check
-            if not self.storage.should_send_alert(alert, self.max_alerts_per_hour):
+            if not await self.storage.should_send_alert(alert, self.max_alerts_per_hour):
                 logger.debug("Rate limiting - skipping alert")
                 return False
             
@@ -156,20 +164,19 @@ class AlertManager:
                 logger.debug("📱 Discord webhook not configured")
             
             # Record alert using storage
+            # Pass the full alert dict to capture all fields (analysis, confidence_score, etc.)
             alert_record = {
-                'timestamp': datetime.now(),
-                'market_id': alert.get('market_id'),
-                'alert_type': alert.get('alert_type'),
-                'severity': alert.get('severity')
+                **alert,  # Include all fields from the alert
+                'timestamp': datetime.now(timezone.utc)  # Ensure timestamp is timezone-aware
             }
-            self.storage.save_alert(alert_record)
-            
+            await self.storage.save_alert(alert_record)
+
             # Update backward compatibility reference
             if hasattr(self.storage, 'alert_history'):
                 self.alert_history = self.storage.alert_history
-            
+
             # Clean old history
-            self.storage.clear_old_alerts()
+            await self.storage.clear_old_alerts()
             
             # Alert was successfully sent
             return True
@@ -370,26 +377,26 @@ class AlertManager:
         
         logger.info("✅ Alert system testing complete")
     
-    def get_alert_stats(self) -> Dict:
+    async def get_alert_stats(self) -> Dict:
         """Get statistics about sent alerts"""
         # Use storage interface to get recent alerts
-        recent_alerts = self.storage.get_recent_alerts(24)
-        
+        recent_alerts = await self.storage.get_recent_alerts(24)
+
         # Count by severity
         severity_counts = {}
         for alert in recent_alerts:
             severity = alert['severity']
             severity_counts[severity] = severity_counts.get(severity, 0) + 1
-        
+
         # Check rate limit status
-        recent_hour_alerts = self.storage.get_recent_alerts(1)
-        
+        recent_hour_alerts = await self.storage.get_recent_alerts(1)
+
         return {
             'total_alerts_24h': len(recent_alerts),
             'by_severity': severity_counts,
             'rate_limit_active': len(recent_hour_alerts) >= self.max_alerts_per_hour
         }
-    
-    def get_statistics(self) -> Dict:
+
+    async def get_statistics(self) -> Dict:
         """Alias for get_alert_stats for backward compatibility"""
-        return self.get_alert_stats()
+        return await self.get_alert_stats()

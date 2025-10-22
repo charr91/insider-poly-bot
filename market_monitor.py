@@ -24,34 +24,46 @@ from common import (
     AlertMetadata, Alert, MarketBaseline, DetectionResult,
     ConfidenceThresholds, TimeConstants, VolumeConstants
 )
+from database import DatabaseManager
+from persistence.alert_storage import DatabaseAlertStorage
+from persistence.whale_tracker import WhaleTracker
+from persistence.outcome_tracker import OutcomeTracker
 
 logger = logging.getLogger(__name__)
 
 class MarketMonitor:
     """Main orchestrator for market monitoring and insider detection"""
     
-    def __init__(self, config_path: str = "insider_config.json"):
+    def __init__(self, config_path: str = "insider_config.json", db_path: str = "insider_data.db"):
         # Load configuration
         self.config = self._load_config(config_path)
         self.settings = Settings(self.config)
-        
+
         # Debug configuration
         self.debug_config = self.config.get('debug', {})
         self.debug_mode = self.debug_config.get('debug_mode', False)
         self.show_normal_activity = self.debug_config.get('show_normal_activity', False)
-        
+
+        # Initialize database
+        self.db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+
         # Initialize data sources
         self.data_api = DataAPIClient()
         self.websocket_client = None
-        
+
         # Initialize detection algorithms
         self.volume_detector = VolumeDetector(self.config)
         self.whale_detector = WhaleDetector(self.config)
         self.price_detector = PriceDetector(self.config)
         self.coordination_detector = CoordinationDetector(self.config)
-        
-        # Initialize alert manager
-        self.alert_manager = AlertManager(self.settings)
+
+        # Initialize persistence layer
+        self.alert_storage = DatabaseAlertStorage(self.db_manager)
+        self.whale_tracker = WhaleTracker(self.db_manager)
+        self.outcome_tracker = OutcomeTracker(self.db_manager, self.data_api)
+
+        # Initialize alert manager with database storage
+        self.alert_manager = AlertManager(self.settings, storage=self.alert_storage)
         
         # Market data storage
         self.monitored_markets = {}
@@ -130,12 +142,17 @@ class MarketMonitor:
     async def start_monitoring(self):
         """Start the market monitoring system"""
         logger.info("🚀 Starting Market Monitor")
-        
+
+        # Initialize database
+        logger.info("📊 Initializing database...")
+        await self.db_manager.init_db()
+        logger.info("✅ Database initialized")
+
         # Test connections
         if not await self._test_connections():
             logger.error("❌ Connection tests failed - aborting startup")
             return
-        
+
         self.running = True
         
         # Start concurrent tasks
@@ -144,7 +161,8 @@ class MarketMonitor:
             asyncio.create_task(self._analysis_loop(), name="analysis"),
             asyncio.create_task(self._websocket_monitor(), name="websocket"),
             asyncio.create_task(self._status_reporter(), name="status_reporter"),
-            asyncio.create_task(self._trade_polling_loop(), name="trade_polling")  # NEW: Real-time trade polling
+            asyncio.create_task(self._trade_polling_loop(), name="trade_polling"),  # Real-time trade polling
+            asyncio.create_task(self._outcome_update_loop(), name="outcome_updates")  # Outcome tracking updates
         ]
         
         try:
@@ -420,8 +438,8 @@ class MarketMonitor:
         
         # Alert breakdown
         if self.alerts_generated > 0:
-            alert_stats = self.alert_manager.get_statistics()
-            
+            alert_stats = await self.alert_manager.get_statistics()
+
             # Show by severity using enum for consistency
             severity_counts = alert_stats.get('by_severity', {})
             severity_parts = []
@@ -681,7 +699,13 @@ class MarketMonitor:
         for alert in alerts:
             if await self.alert_manager.send_alert(alert):
                 alerts_sent_successfully += 1
-        
+
+                # Track whales for whale/coordination alerts
+                await self._track_whales_from_alert(alert, trades)
+
+                # Initialize outcome tracking for the alert
+                await self._initialize_outcome_tracking(alert, market_id)
+
         return alerts_sent_successfully
     
     async def _get_market_trades(self, market_id: str) -> List[Dict]:
@@ -966,3 +990,172 @@ class MarketMonitor:
             return "👀 Monitor closely - potential early signal"
         else:
             return "📝 Note activity - wait for confirmation"
+
+    async def _track_whales_from_alert(self, alert: Dict, trades: List[Dict]) -> None:
+        """Track whale addresses from whale/coordination alerts"""
+        try:
+            alert_type_str = alert.get('alert_type', '')
+
+            # Only track whales for whale and coordination alerts
+            if alert_type_str not in ['WHALE_ACTIVITY', 'COORDINATED_TRADING']:
+                return
+
+            analysis = alert.get('analysis', {})
+
+            # Get alert ID from the recently saved alert in database
+            # We need to query the most recent alert for this market
+            market_id = alert.get('market_id')
+            from database import AlertRepository
+            async with self.db_manager.session() as session:
+                alert_repo = AlertRepository(session)
+                recent_alerts = await alert_repo.get_recent_alerts(
+                    hours=0.1,  # Last 6 minutes
+                    market_id=market_id,
+                    alert_type=alert_type_str,
+                    limit=1
+                )
+
+                if not recent_alerts:
+                    logger.warning(f"Could not find alert ID for whale tracking")
+                    return
+
+                alert_id = recent_alerts[0].id
+
+            # Track whales based on alert type
+            if alert_type_str == 'WHALE_ACTIVITY':
+                # Get whale trades from analysis
+                whale_trades = analysis.get('whale_trades', [])
+
+                for whale_trade in whale_trades:
+                    address = whale_trade.get('address')
+                    if not address:
+                        continue
+
+                    trade_data = {
+                        'volume_usd': whale_trade.get('size', 0),
+                        'side': whale_trade.get('side', 'BUY'),
+                        'market_id': market_id,
+                        'metrics': {
+                            'trade_price': whale_trade.get('price', 0),
+                            'trade_timestamp': whale_trade.get('timestamp')
+                        }
+                    }
+
+                    from common import WhaleRole
+                    role = WhaleRole.PRIMARY_ACTOR if len(whale_trades) == 1 else WhaleRole.PARTICIPANT
+
+                    await self.whale_tracker.track_whale(
+                        address=address,
+                        trade_data=trade_data,
+                        alert_id=alert_id,
+                        tags=['whale_activity'],
+                        whale_role=role
+                    )
+
+                logger.debug(f"Tracked {len(whale_trades)} whale addresses from alert")
+
+            elif alert_type_str == 'COORDINATED_TRADING':
+                # Get coordinated wallets from analysis
+                cluster_wallets = analysis.get('cluster_wallets', [])
+
+                for wallet_info in cluster_wallets:
+                    address = wallet_info.get('address')
+                    if not address:
+                        continue
+
+                    trade_data = {
+                        'volume_usd': wallet_info.get('total_volume', 0),
+                        'side': wallet_info.get('side', 'BUY'),
+                        'market_id': market_id,
+                        'metrics': {
+                            'trade_count': wallet_info.get('trade_count', 1),
+                            'avg_trade_size': wallet_info.get('avg_size', 0)
+                        }
+                    }
+
+                    from common import WhaleRole
+                    await self.whale_tracker.track_whale(
+                        address=address,
+                        trade_data=trade_data,
+                        alert_id=alert_id,
+                        tags=['coordination', 'cluster'],
+                        whale_role=WhaleRole.COORDINATOR
+                    )
+
+                logger.debug(f"Tracked {len(cluster_wallets)} coordinated wallets from alert")
+
+        except Exception as e:
+            logger.error(f"Failed to track whales from alert: {e}", exc_info=True)
+
+    async def _initialize_outcome_tracking(self, alert: Dict, market_id: str) -> None:
+        """Initialize outcome tracking for an alert"""
+        try:
+            # Get alert ID from database
+            alert_type_str = alert.get('alert_type', '')
+            from database import AlertRepository
+            async with self.db_manager.session() as session:
+                alert_repo = AlertRepository(session)
+                recent_alerts = await alert_repo.get_recent_alerts(
+                    hours=0.1,  # Last 6 minutes
+                    market_id=market_id,
+                    alert_type=alert_type_str,
+                    limit=1
+                )
+
+                if not recent_alerts:
+                    logger.warning(f"Could not find alert ID for outcome tracking")
+                    return
+
+                alert_id = recent_alerts[0].id
+
+            # Get current market price
+            market_data = alert.get('market_data', {})
+            current_price = float(market_data.get('lastTradePrice', 0.5))
+
+            # Determine predicted direction based on alert type and analysis
+            analysis = alert.get('analysis', {})
+            predicted_direction = 'BUY'  # Default
+
+            if alert_type_str == 'WHALE_ACTIVITY':
+                dominant_side = analysis.get('dominant_side', 'BUY')
+                predicted_direction = dominant_side
+            elif alert_type_str == 'COORDINATED_TRADING':
+                # For coordination, use the side with more activity
+                predicted_direction = analysis.get('dominant_side', 'BUY')
+            elif alert_type_str == 'VOLUME_SPIKE':
+                # For volume spikes, infer direction from recent momentum
+                # For now, default to BUY (can be enhanced later)
+                predicted_direction = 'BUY'
+
+            # Create outcome record
+            await self.outcome_tracker.create_outcome_record(
+                alert_id=alert_id,
+                market_id=market_id,
+                current_price=current_price,
+                predicted_direction=predicted_direction
+            )
+
+            logger.debug(f"Initialized outcome tracking for alert {alert_id} (price: ${current_price:.3f}, direction: {predicted_direction})")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize outcome tracking: {e}", exc_info=True)
+
+    async def _outcome_update_loop(self):
+        """Background task to update alert outcomes periodically"""
+        # Wait a bit before starting to allow alerts to be created
+        await asyncio.sleep(300)  # 5 minutes
+
+        while self.running:
+            try:
+                logger.debug("🔄 Updating alert outcomes...")
+                updated_count = await self.outcome_tracker.update_price_outcomes(batch_size=50)
+
+                if updated_count > 0:
+                    logger.info(f"📊 Updated {updated_count} alert outcomes")
+
+                # Update every 15 minutes
+                await asyncio.sleep(900)
+
+            except Exception as e:
+                logger.error(f"Error in outcome update loop: {e}", exc_info=True)
+                await asyncio.sleep(300)  # Wait 5 minutes before retrying

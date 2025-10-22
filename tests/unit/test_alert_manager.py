@@ -230,26 +230,27 @@ class TestConnectionTesting:
 
 class TestAlertStatistics:
     """Test alert statistics functionality"""
-    
-    def test_get_alert_stats(self, mock_settings):
+
+    @pytest.mark.asyncio
+    async def test_get_alert_stats(self, mock_settings):
         """Test alert statistics calculation"""
         am = AlertManager(mock_settings)
-        
+
         # Add some mock alert history using storage interface
-        am.storage.save_alert({
+        await am.storage.save_alert({
             'timestamp': datetime.now(),
             'market_id': 'test-1',
             'alert_type': 'VOLUME_SPIKE',
             'severity': 'HIGH'
         })
-        am.storage.save_alert({
+        await am.storage.save_alert({
             'timestamp': datetime.now(),
             'market_id': 'test-2',
             'alert_type': 'WHALE_ACTIVITY',
             'severity': 'MEDIUM'
         })
-        
-        stats = am.get_alert_stats()
+
+        stats = await am.get_alert_stats()
         assert stats['total_alerts_24h'] == 2
         assert 'HIGH' in stats['by_severity']
         # by_type field no longer exists
