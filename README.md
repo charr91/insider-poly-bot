@@ -449,18 +449,45 @@ $ insider-bot alerts recent --severity HIGH --hours 12
 └────┴──────────┴──────────────┴──────┴─────────┘
 ```
 
+## 🐳 Deployment
+
+### Run with Docker
+
+The bot runs in Docker for easy setup and 24/7 operation.
+
+#### Quick Start
+
+```bash
+# Clone and configure
+git clone <repository-url>
+cd insider-poly-bot
+cp .env.example .env
+nano .env  # Add your API keys
+
+# Start the bot
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+```
+
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for complete setup instructions, monitoring, and troubleshooting.
+
+For advanced VPS deployment with automated backups and monitoring, see [deployment/ADVANCED.md](deployment/ADVANCED.md).
+
 ## 📖 Documentation Navigation
 
 | **Getting Started** | **Configuration** | **Operations** | **Development** | **Support** |
 |:-------------------|:------------------|:---------------|:----------------|:------------|
 | [📦 Installation](#-installation) | [⚙️ Configuration Guide](CONFIGURATION.md) | [💻 Usage Examples](USAGE.md) | [🧪 Testing Guide](TESTING.md) | [🔧 Troubleshooting](TROUBLESHOOTING.md) |
-| [🚀 Quick Start](#-quick-start) | [🎛️ Tuning Guidelines](CONFIGURATION.md#-tuning-guidelines) | [🐳 Debug Mode](USAGE.md#-debug-and-development-usage) | [🏗️ Test Architecture](TESTING.md#-test-architecture) | [❓ FAQ](TROUBLESHOOTING.md#-frequently-asked-questions) |
+| [🚀 Quick Start](#-quick-start) | [🎛️ Tuning Guidelines](CONFIGURATION.md#-tuning-guidelines) | [🐳 Docker Deployment](DEPLOYMENT.md) | [🏗️ Test Architecture](TESTING.md#-test-architecture) | [❓ FAQ](TROUBLESHOOTING.md#-frequently-asked-questions) |
 | [📁 Project Structure](#-project-structure) | [🔐 Environment Setup](CONFIGURATION.md#-environment-variables) | [📊 Performance Tips](USAGE.md#-performance-optimization) | [🚀 Running Tests](TESTING.md#-running-tests) | [🚨 Emergency Procedures](TROUBLESHOOTING.md#-emergency-procedures) |
 
 ### Quick Reference
 - **First time setup**: [Installation](#-installation) → [Configuration](CONFIGURATION.md) → [Quick Start](#-quick-start)
+- **Docker deployment**: [Deployment](#-deployment) → [DEPLOYMENT.md](DEPLOYMENT.md)
 - **Database & CLI**: [Database Features](#-database--persistence) → [CLI Usage](#-cli-usage)
 - **Customization**: [Configuration Guide](CONFIGURATION.md) → [Usage Examples](USAGE.md)
 - **Development**: [Testing Guide](TESTING.md) → [Writing Tests](TESTING.md#-writing-new-tests)
 - **Issues**: [Troubleshooting](TROUBLESHOOTING.md) → [FAQ](TROUBLESHOOTING.md#-frequently-asked-questions)
-- **Advanced usage**: [Usage Guide](USAGE.md) → [Performance Optimization](USAGE.md#-performance-optimization)
+- **Advanced deployment**: [Advanced VPS Setup](deployment/ADVANCED.md)

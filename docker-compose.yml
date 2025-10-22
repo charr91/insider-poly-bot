@@ -1,0 +1,56 @@
+services:
+  insider-poly-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: insider-poly-bot
+    restart: unless-stopped
+
+    # Environment variables from .env file
+    env_file:
+      - .env
+
+    # Volume mounts for data persistence
+    volumes:
+      # Database persistence
+      - ./insider_data.db:/app/insider_data.db
+      # Logs persistence
+      - ./logs:/app/logs
+      # Config file (can be customized per environment)
+      - ./insider_config.json:/app/insider_config.json:ro
+
+    # Resource limits (adjust based on your VPS capacity)
+    # Note: For docker-compose v1, use --compatibility flag or remove these limits
+    mem_limit: 1g
+    cpus: 1.0
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 1G
+    #     reservations:
+    #       cpus: '0.25'
+    #       memory: 256M
+
+    # Logging configuration to prevent disk space issues
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    # Network mode (can be customized if needed)
+    network_mode: bridge
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "python.*main.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# Optional: Named volumes for better management
+# volumes:
+#   bot-data:
+#   bot-logs:
