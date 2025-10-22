@@ -84,7 +84,8 @@ class SimulationEngine:
     def __init__(
         self,
         config: Dict,
-        detectors: Optional[Dict] = None
+        detectors: Optional[Dict] = None,
+        track_outcomes: bool = True
     ):
         """
         Initialize simulation engine.
@@ -93,6 +94,7 @@ class SimulationEngine:
             config: Configuration dictionary for detectors
             detectors: Optional dict of detector instances
                       Format: {'volume': VolumeDetector(...), ...}
+            track_outcomes: Whether to track alert outcomes for metrics (default: True)
         """
         self.config = config
         self.detectors = detectors or {}
@@ -107,6 +109,19 @@ class SimulationEngine:
         self.trades_by_market = defaultdict(int)
         self.alerts_by_detector = defaultdict(int)
         self.alerts_by_severity = defaultdict(int)
+
+        # Outcome tracking for metrics
+        self.track_outcomes = track_outcomes
+        self.outcome_tracker = None
+        self.metrics_calculator = None
+
+        if track_outcomes:
+            # Import here to avoid circular dependency
+            from backtesting.outcome_tracker import OutcomeTracker
+            from backtesting.metrics_calculator import MetricsCalculator
+
+            self.outcome_tracker = OutcomeTracker()
+            self.metrics_calculator = MetricsCalculator()
 
         logger.info("🎬 Simulation engine initialized")
 
@@ -466,6 +481,166 @@ class SimulationEngine:
                 if self.total_trades_processed > 0 else 0
             )
         }
+
+    def calculate_alert_outcomes(self, interval_hours: List[int] = [1, 4, 24]):
+        """
+        Calculate outcomes for all alerts by tracking price movements.
+
+        This simulates tracking price at intervals after each alert using
+        the market state data collected during simulation.
+
+        Args:
+            interval_hours: List of hours to check (default: [1, 4, 24])
+        """
+        if not self.track_outcomes or not self.outcome_tracker:
+            logger.warning("Outcome tracking is disabled")
+            return
+
+        logger.info(f"📊 Calculating outcomes for {len(self.virtual_alerts)} alerts...")
+
+        for alert in self.virtual_alerts:
+            # Track this alert
+            self.outcome_tracker.track_alert(
+                alert_id=alert.alert_id,
+                market_id=alert.market_id,
+                alert_timestamp=alert.timestamp,
+                predicted_direction=alert.predicted_direction,
+                confidence_score=alert.confidence_score,
+                price_at_alert=alert.price_at_alert,
+                detector_type=alert.detector_type,
+                severity=alert.severity
+            )
+
+            # Get market state for this alert
+            market_state = self.market_states.get(alert.market_id)
+            if not market_state:
+                continue
+
+            # Calculate prices at intervals
+            for hours in interval_hours:
+                target_time = alert.timestamp + timedelta(hours=hours)
+                price = self._estimate_price_at_time(market_state, target_time)
+
+                if price is not None:
+                    interval_key = f"{hours}h"
+                    self.outcome_tracker.update_price_at_interval(
+                        alert_id=alert.alert_id,
+                        interval=interval_key,
+                        price=price,
+                        timestamp=target_time
+                    )
+
+        logger.info(f"✅ Calculated outcomes for {len(self.outcome_tracker.outcomes)} alerts")
+
+    def _estimate_price_at_time(
+        self,
+        market_state: MarketState,
+        target_time: datetime
+    ) -> Optional[float]:
+        """
+        Estimate market price at a specific time from trade history.
+
+        Uses nearest trade or interpolates between trades.
+
+        Args:
+            market_state: Market state with trade history
+            target_time: Time to estimate price for
+
+        Returns:
+            Estimated price or None if not enough data
+        """
+        if not market_state.trade_history:
+            return None
+
+        target_ts = target_time.timestamp()
+
+        # Find trades around target time
+        trades_before = [
+            t for t in market_state.trade_history
+            if t['timestamp'] <= target_ts
+        ]
+        trades_after = [
+            t for t in market_state.trade_history
+            if t['timestamp'] > target_ts
+        ]
+
+        # If we have exact or nearby trades, use price
+        if trades_after and len(trades_after) > 0:
+            return trades_after[0]['price']
+        elif trades_before and len(trades_before) > 0:
+            return trades_before[-1]['price']
+
+        # Default to 0.5 if no data
+        return 0.5
+
+    def calculate_metrics(
+        self,
+        interval: str = '24h',
+        min_confidence: Optional[float] = None
+    ):
+        """
+        Calculate performance metrics from tracked outcomes.
+
+        Args:
+            interval: Time interval to analyze ('1h', '4h', '24h')
+            min_confidence: Optional minimum confidence threshold
+
+        Returns:
+            PerformanceMetrics object with all calculated metrics
+        """
+        if not self.track_outcomes or not self.metrics_calculator:
+            logger.warning("Metrics tracking is disabled")
+            return None
+
+        if not self.outcome_tracker:
+            logger.warning("No outcome tracker available")
+            return None
+
+        outcomes = self.outcome_tracker.get_all_outcomes()
+        metrics = self.metrics_calculator.calculate_metrics(
+            outcomes=outcomes,
+            interval=interval,
+            min_confidence=min_confidence
+        )
+
+        return metrics
+
+    def export_metrics_to_json(self, filepath: str, interval: str = '24h'):
+        """
+        Export performance metrics to JSON file.
+
+        Args:
+            filepath: Path to save metrics JSON
+            interval: Time interval for metrics
+        """
+        if not self.track_outcomes:
+            logger.warning("Outcome tracking is disabled, no metrics to export")
+            return
+
+        metrics = self.calculate_metrics(interval=interval)
+        if not metrics:
+            logger.warning("No metrics available to export")
+            return
+
+        metrics_dict = self.metrics_calculator.export_metrics_to_dict(metrics)
+
+        with open(filepath, 'w') as f:
+            json.dump(metrics_dict, f, indent=2)
+
+        logger.info(f"📊 Exported metrics to {filepath}")
+
+    def export_outcomes_to_json(self, filepath: str):
+        """Export alert outcomes to JSON file"""
+        if not self.track_outcomes or not self.outcome_tracker:
+            logger.warning("Outcome tracking is disabled")
+            return
+
+        outcomes_data = self.outcome_tracker.export_to_dict()
+
+        with open(filepath, 'w') as f:
+            json.dump(outcomes_data, f, indent=2)
+
+        logger.info(f"📊 Exported {len(outcomes_data)} outcomes to {filepath}")
 
     def export_alerts_to_json(self, filepath: str):
         """Export virtual alerts to JSON file"""

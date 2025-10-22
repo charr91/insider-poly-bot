@@ -259,6 +259,152 @@ high_alerts = engine.get_alerts(severity='HIGH')
 engine.export_alerts_to_json("simulation_results.json")
 ```
 
+### 5. Outcome Tracker (`outcome_tracker.py`)
+
+Tracks alert outcomes to measure detection accuracy and profitability.
+
+**Features:**
+- Price movement tracking at intervals (1h, 4h, 24h)
+- Direction classification (UP, DOWN, FLAT)
+- Prediction correctness validation
+- ROI calculation per alert
+- Confusion matrix classification
+
+**Usage:**
+```python
+from backtesting import OutcomeTracker
+
+tracker = OutcomeTracker(price_change_threshold=0.05)
+
+# Track an alert
+outcome = tracker.track_alert(
+    alert_id="alert_001",
+    market_id="market_123",
+    alert_timestamp=datetime.now(),
+    predicted_direction="BUY",
+    confidence_score=0.85,
+    price_at_alert=0.50
+)
+
+# Update price at intervals
+tracker.update_price_at_interval("alert_001", "1h", 0.52, time_1h_later)
+tracker.update_price_at_interval("alert_001", "4h", 0.55, time_4h_later)
+tracker.update_price_at_interval("alert_001", "24h", 0.60, time_24h_later)
+
+# Get aggregated metrics
+metrics = tracker.calculate_aggregate_metrics(interval='24h')
+print(f"Accuracy: {metrics['accuracy']:.2%}")
+print(f"Win Rate: {metrics['win_rate']:.2%}")
+```
+
+### 6. Metrics Calculator (`metrics_calculator.py`)
+
+Calculates comprehensive performance metrics from alert outcomes.
+
+**Metrics Provided:**
+- **Classification**: Precision, Recall, F1 Score, Accuracy
+- **Financial**: ROI, Win Rate, Average Return, Sharpe Ratio
+- **Confusion Matrix**: True/False Positives/Negatives
+- **By Detector**: Performance breakdown by detector type
+- **By Confidence**: Threshold analysis
+
+**Usage:**
+```python
+from backtesting import MetricsCalculator
+
+calculator = MetricsCalculator()
+
+# Calculate metrics from outcomes
+metrics = calculator.calculate_metrics(
+    outcomes=tracker.get_all_outcomes(),
+    interval='24h',
+    min_confidence=0.70  # Optional filter
+)
+
+# Display formatted report
+calculator.print_metrics_report(metrics)
+
+# Export to JSON
+metrics_dict = calculator.export_metrics_to_dict(metrics)
+```
+
+**Metrics Explained:**
+
+- **Precision**: What % of alerts were correct predictions?
+  - Formula: `TP / (TP + FP)`
+  - High precision = Few false alarms
+
+- **Recall**: What % of actual events did we detect?
+  - Formula: `TP / (TP + FN)`
+  - High recall = Few missed opportunities
+
+- **F1 Score**: Balanced metric between precision and recall
+  - Formula: `2 * (Precision * Recall) / (Precision + Recall)`
+  - Useful when you want balanced performance
+
+- **ROI**: Total return on investment if following all alerts
+  - Sum of all returns across alerts
+  - Measures profitability
+
+- **Win Rate**: Percentage of profitable predictions
+  - Formula: `Profitable trades / Total trades`
+
+- **Sharpe Ratio**: Risk-adjusted return
+  - Formula: `Mean Return / Std Dev of Returns`
+  - Higher is better (>1 is good, >2 is excellent)
+
+## Integration with Simulation Engine
+
+The simulation engine automatically tracks outcomes and calculates metrics:
+
+```python
+from backtesting import SimulationEngine
+
+# Create engine with outcome tracking (default: enabled)
+engine = SimulationEngine(
+    config=config,
+    detectors=detectors,
+    track_outcomes=True  # Default
+)
+
+# Run simulation
+stats = engine.simulate_trades(trades)
+
+# Calculate outcomes from simulation data
+engine.calculate_alert_outcomes(interval_hours=[1, 4, 24])
+
+# Get performance metrics
+metrics = engine.calculate_metrics(interval='24h')
+
+# Export everything
+engine.export_alerts_to_json("alerts.json")
+engine.export_outcomes_to_json("outcomes.json")
+engine.export_metrics_to_json("metrics.json")
+```
+
+## Performance Optimization
+
+The backtesting framework supports two simulation modes:
+
+**Sequential Mode** (default):
+- Maintains chronological order
+- Better for time-sensitive analysis
+- Speed: ~65 trades/sec
+
+**Batch Mode** (faster):
+- Groups by market for parallel processing
+- 10-30x faster than sequential
+- Speed: ~500-2000 trades/sec
+- Trade-off: Loses cross-market temporal context
+
+```python
+# Use batch mode for large datasets
+stats = engine.simulate_trades_batch(
+    trades,
+    progress_callback=callback
+)
+```
+
 ## Testing
 
 Comprehensive test suite with **70 passing tests**:

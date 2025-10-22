@@ -347,42 +347,87 @@ class BacktestingDemo:
             print(f"    {market_short:<25} {count:,} alerts")
 
     def step_4_validation_report(self):
-        """Step 4: Generate validation report (placeholder for future features)"""
-        self.print_header("STEP 4: Validation Report")
+        """Step 4: Generate validation report and performance metrics"""
+        self.print_header("STEP 4: Performance Metrics & Validation")
 
-        print("\n📊 Report Components:\n")
+        if not self.alerts:
+            print("\n⚠️  No alerts generated, skipping metrics calculation")
+            return
 
-        # Placeholder: Market outcome validation
-        print("  [ ] Market Outcome Validation")
-        print("      → Requires fetching market resolution data")
-        print("      → Would calculate: alert accuracy, price prediction correctness")
-        print()
+        # Calculate alert outcomes
+        print("\n📊 Calculating alert outcomes...")
+        self.engine.calculate_alert_outcomes(interval_hours=[1, 4, 24])
 
-        # Placeholder: Performance metrics
-        print("  [ ] Performance Metrics Calculation")
-        print("      → Requires implementing metrics collector")
-        print("      → Would calculate: precision, recall, F1 score, ROI")
-        print()
+        # Get completed outcomes count
+        if self.engine.outcome_tracker:
+            completed = len(self.engine.outcome_tracker.get_completed_outcomes())
+            print(f"  ✓ Processed {completed} completed outcomes")
 
-        # Placeholder: Report generation
-        print("  [ ] Visual Report Generation")
-        print("      → Requires implementing report generator")
-        print("      → Would generate: charts, tables, comparisons")
-        print()
+        # Calculate metrics
+        print("\n📈 Calculating performance metrics...")
+        metrics = self.engine.calculate_metrics(interval='24h')
 
-        # What we CAN provide now
-        print("  [✓] Alert Export (Available Now)")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"backtesting/results/simulation_results_{timestamp}.json"
-        self.engine.export_alerts_to_json(output_file)
-        print(f"      → Alerts exported to: {output_file}")
-        print()
+        if metrics:
+            # Display metrics report
+            self.engine.metrics_calculator.print_metrics_report(metrics)
 
-        print("💡 These features will be implemented in future updates:")
-        print("   - Automatic market outcome fetching")
-        print("   - Precision/recall/F1 calculations")
-        print("   - HTML/PDF report generation")
-        print("   - Historical performance tracking")
+            # Export everything
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Export alerts
+            alerts_file = f"backtesting/results/alerts_{timestamp}.json"
+            self.engine.export_alerts_to_json(alerts_file)
+            print(f"\n  ✓ Alerts exported to: {alerts_file}")
+
+            # Export outcomes
+            outcomes_file = f"backtesting/results/outcomes_{timestamp}.json"
+            self.engine.export_outcomes_to_json(outcomes_file)
+            print(f"  ✓ Outcomes exported to: {outcomes_file}")
+
+            # Export metrics
+            metrics_file = f"backtesting/results/metrics_{timestamp}.json"
+            self.engine.export_metrics_to_json(metrics_file, interval='24h')
+            print(f"  ✓ Metrics exported to: {metrics_file}")
+
+            # Summary recommendations
+            print("\n💡 Analysis Summary:")
+            if metrics.precision >= 0.7:
+                print(f"  ✅ High precision ({metrics.precision:.1%}) - alerts are reliable")
+            elif metrics.precision >= 0.5:
+                print(f"  ⚠️  Moderate precision ({metrics.precision:.1%}) - some false positives")
+            else:
+                print(f"  ❌ Low precision ({metrics.precision:.1%}) - many false positives")
+
+            if metrics.win_rate >= 0.6:
+                print(f"  ✅ Good win rate ({metrics.win_rate:.1%}) - profitable strategy")
+            elif metrics.win_rate >= 0.5:
+                print(f"  ⚠️  Break-even win rate ({metrics.win_rate:.1%})")
+            else:
+                print(f"  ❌ Low win rate ({metrics.win_rate:.1%}) - losing strategy")
+
+            if metrics.f1_score >= 0.7:
+                print(f"  ✅ Strong F1 score ({metrics.f1_score:.1%}) - balanced performance")
+            else:
+                print(f"  ⚠️  F1 score ({metrics.f1_score:.1%}) - room for improvement")
+
+        else:
+            print("\n⚠️  Could not calculate metrics - insufficient outcome data")
+            print("  This may happen if:")
+            print("    - Trade data doesn't cover full intervals (1h, 4h, 24h)")
+            print("    - Markets don't have price movement data")
+            print("    - No alerts were generated")
+
+            # Still export alerts
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            alerts_file = f"backtesting/results/alerts_{timestamp}.json"
+            self.engine.export_alerts_to_json(alerts_file)
+            print(f"\n  ✓ Alerts exported to: {alerts_file}")
+
+        print("\n📚 Next Steps:")
+        print("  - Review exported JSON files for detailed data")
+        print("  - Adjust detector thresholds to improve precision/recall")
+        print("  - Run with longer time ranges for more data")
+        print("  - Test different confidence thresholds")
 
     def run(
         self,
