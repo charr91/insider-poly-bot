@@ -10,6 +10,10 @@ services:
     env_file:
       - .env
 
+    # Timezone configuration
+    environment:
+      - TZ=America/Los_Angeles
+
     # Volume mounts for data persistence
     volumes:
       # Data directory for database and logs
