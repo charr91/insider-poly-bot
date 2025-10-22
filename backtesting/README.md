@@ -6,6 +6,55 @@ Comprehensive framework for backtesting Polymarket insider trading detection alg
 
 This framework enables validation and optimization of detection algorithms by replaying historical trade data through the detection system and measuring performance metrics.
 
+## Quick Start
+
+### End-to-End Demo (Recommended)
+
+Run the comprehensive demo to test everything with real blockchain data:
+
+```bash
+# Run full pipeline: load data, simulate, analyze
+python backtesting/demo_end_to_end.py
+
+# Load 30 days of data and test with more trades
+python backtesting/demo_end_to_end.py --days 30 --limit 50000
+
+# Use specific detectors
+python backtesting/demo_end_to_end.py --detectors volume whale price
+
+# See all options
+python backtesting/demo_end_to_end.py --help
+```
+
+**What it does:**
+1. Fetches real historical trades from The Graph (free, no API key needed)
+2. Runs simulation through your detection algorithms
+3. Shows detailed alert analysis with confidence scores
+4. Exports results to JSON for further analysis
+
+**First run takes 1-5 minutes** to download data. Subsequent runs are instant if using existing database.
+
+**Performance Modes:**
+- **Sequential mode (default)**: Maintains chronological order, ~65 trades/sec
+- **Batch mode (`--batch`)**: Groups by market, ~500-2000 trades/sec, 10-30x faster
+
+```bash
+# Fast mode for large datasets
+python backtesting/demo_end_to_end.py --batch --limit 100000
+```
+
+### Individual Component Demos
+
+Test specific components separately:
+
+```bash
+# Demo 1: Just load historical data
+python backtesting/data_loader.py
+
+# Demo 2: Run simulation on existing data
+python backtesting/simulation_engine.py
+```
+
 ## Components
 
 ### 1. Graph Client (`graph_client.py`)
@@ -127,9 +176,92 @@ with HistoricalDataLoader(db_path="backtest.db") as loader:
     storage_stats = loader.get_storage_stats()
 ```
 
+### 4. Simulation Engine (`simulation_engine.py`)
+
+Replays historical trades through detection algorithms to measure performance.
+
+**Features:**
+- Maintains market state during simulation
+- Runs detectors on trade streams
+- Generates virtual alerts
+- Tracks comprehensive statistics
+- JSON export for analysis
+
+**Key Classes:**
+```python
+@dataclass
+class MarketState:
+    """Tracks state of a market during simulation"""
+    market_id: str
+    trade_history: deque  # Last 1000 trades
+    total_volume: float
+    trade_count: int
+    unique_makers: set
+    unique_takers: set
+
+@dataclass
+class VirtualAlert:
+    """Alert generated during simulation"""
+    alert_id: str
+    timestamp: datetime
+    market_id: str
+    detector_type: str
+    severity: str
+    confidence_score: float
+    price_at_alert: Optional[float]
+    predicted_direction: Optional[str]
+
+class SimulationEngine:
+    def simulate_trades(
+        self,
+        trades: List[Dict],
+        progress_callback: Optional[Callable] = None
+    ) -> Dict:
+        """Run simulation, returns statistics"""
+```
+
+**Usage:**
+```python
+from backtesting import SimulationEngine
+from detection.volume_detector import VolumeDetector
+from config.settings import SettingsManager
+
+# Load config and create detectors
+settings = SettingsManager()
+config = settings.get_config()
+
+detectors = {
+    'volume': VolumeDetector(config),
+    'whale': WhaleDetector(config)
+}
+
+# Create simulation engine
+engine = SimulationEngine(config=config, detectors=detectors)
+
+# Load historical trades from storage
+with HistoricalTradeStorage("backtest.db") as storage:
+    trades = storage.get_trades_by_time_range(
+        start_timestamp=start_ts,
+        end_timestamp=end_ts,
+        limit=10000
+    )
+
+# Run simulation
+stats = engine.simulate_trades(trades)
+
+print(f"Total alerts: {stats['total_alerts']}")
+print(f"Alerts by detector: {stats['alerts_by_detector']}")
+
+# Get alerts for analysis
+high_alerts = engine.get_alerts(severity='HIGH')
+
+# Export results
+engine.export_alerts_to_json("simulation_results.json")
+```
+
 ## Testing
 
-Comprehensive test suite with **42 passing tests**:
+Comprehensive test suite with **70 passing tests**:
 
 - **Storage Tests** (26 tests): `tests/backtesting/test_historical_storage.py`
   - Database initialization
@@ -145,13 +277,21 @@ Comprehensive test suite with **42 passing tests**:
   - Incremental updates
   - Context managers
 
+- **Simulation Engine Tests** (28 tests): `tests/backtesting/test_simulation_engine.py`
+  - MarketState tracking
+  - Trade format conversion
+  - Detector integration
+  - Alert generation and filtering
+  - Statistics and export
+  - Error handling
+
 **Run tests:**
 ```bash
 # All backtesting tests
 python -m pytest tests/backtesting/ -v
 
 # Specific test file
-python -m pytest tests/backtesting/test_historical_storage.py -v
+python -m pytest tests/backtesting/test_simulation_engine.py -v
 
 # With coverage
 python -m pytest tests/backtesting/ --cov=backtesting --cov-report=html
@@ -234,51 +374,97 @@ python backtesting/data_loader.py
 
 ## Next Steps
 
-The foundation is complete! Next components to build:
+Core infrastructure complete! Next components to build:
 
-1. **Simulation Engine** - Replay trades through detectors
-2. **Metrics Collector** - Calculate precision, recall, F1
+1. ✅ **Simulation Engine** - COMPLETE
+2. **Metrics Collector** - Calculate precision, recall, F1, ROI
 3. **Configuration Tester** - A/B test detector parameters
-4. **Report Generator** - Performance visualization
+4. **Report Generator** - Performance visualization and analysis
 
 ## Architecture
 
 ```
-┌─────────────────┐
-│  The Graph API  │  (Blockchain data source)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  GraphClient    │  (Fetch historical trades)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Data Loader    │  (Orchestrate fetching)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Storage        │  (SQLite database)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Simulation     │  (Coming next...)
-│  Engine         │
-└─────────────────┘
+┌─────────────────────┐
+│  The Graph API      │  (Blockchain data source)
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│  GraphClient        │  (Fetch historical trades)
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│  Data Loader        │  (Orchestrate fetching)
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│  Storage (SQLite)   │  (Historical trade database)
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│  Simulation Engine  │  (Replay trades through detectors)
+└──────────┬──────────┘
+           │
+           ├──► Volume Detector
+           ├──► Whale Detector
+           ├──► Price Detector
+           └──► Coordination Detector
+           │
+           ▼
+┌─────────────────────┐
+│  Virtual Alerts     │  (Simulated detection results)
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│  Metrics Collector  │  (Coming next...)
+└─────────────────────┘
 ```
 
 ## Performance Notes
+
+### Simulation Speed
+
+**Sequential Mode** (default, maintains chronological order):
+- 1,000 trades: ~15-20 seconds
+- 10,000 trades: ~2-3 minutes
+- 100,000 trades: ~20-30 minutes
+- **Use when**: Cross-market timing matters, smaller datasets
+
+**Batch Mode** (`--batch` flag, groups by market):
+- 1,000 trades: ~2-5 seconds (5-10x faster)
+- 10,000 trades: ~10-30 seconds (10-20x faster)
+- 100,000 trades: ~1-2 minutes (10-15x faster)
+- **Use when**: Processing large datasets, per-market analysis
+
+**Optimization Details:**
+- Detectors run every 50 trades (configurable in code)
+- Batch mode: 1 detector run per market (154 runs for 10k trades)
+- Sequential mode: ~200 detector runs for 10k trades
+- Progress updates every 100 trades with ETA
+
+### Data Loading
 
 - **Graph API Rate Limits**: Public endpoint, be respectful
 - **Pagination**: 1000 trades per query (Graph limit)
 - **Batch Insert**: Efficient bulk inserts with duplicate detection
 - **Indexes**: Optimized for time-range and asset queries
-- **Progress Tracking**: Optional callbacks for long operations
+- **Progress Tracking**: Real-time callbacks with ETA
 
 ## Troubleshooting
+
+### Import Errors
+
+```bash
+# Error: "attempted relative import with no known parent package"
+# Solution: Imports are now fixed. Run scripts directly:
+python backtesting/data_loader.py
+python backtesting/simulation_engine.py
+python backtesting/demo_end_to_end.py
+```
 
 ### Connection Issues
 
@@ -304,11 +490,20 @@ with HistoricalTradeStorage("backtest.db") as storage:
     print(f"Database OK: {stats['total_trades']} trades")
 ```
 
+### No Alerts Generated
+
+- **Expected behavior**: If market conditions don't meet detector thresholds, no alerts will be generated
+- Try longer time range: `--days 30` or `--days 60`
+- Try more trades: `--limit 50000`
+- Check detector thresholds in `config/settings.py`
+- Use `--debug` flag to see detector decision logs
+
 ### Slow Loading
 
 - Reduce batch size: `loader.load_days_back(days=60, batch_size=500)`
 - Load incrementally: Start with fewer days, expand as needed
 - Check network connection
+- The Graph API is free but rate-limited - be patient on first load
 
 ## References
 

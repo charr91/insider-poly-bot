@@ -84,3 +84,11 @@ node_modules/
 # Task files
 tasks.json
 .taskmaster
+
+# Backtesting data and results
+*.db
+demo_backtest.db
+insider_data.db
+backtesting/results/
+simulation_results_*.json
+simulation_alerts.json

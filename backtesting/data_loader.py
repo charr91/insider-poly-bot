@@ -8,8 +8,13 @@ import logging
 from typing import Optional, Callable
 from datetime import datetime, timedelta, timezone
 
-from .graph_client import PolymarketGraphClient
-from .historical_storage import HistoricalTradeStorage
+# Use try/except for imports to support both module use and direct execution
+try:
+    from .graph_client import PolymarketGraphClient
+    from .historical_storage import HistoricalTradeStorage
+except ImportError:
+    from graph_client import PolymarketGraphClient
+    from historical_storage import HistoricalTradeStorage
 
 logger = logging.getLogger(__name__)
 
