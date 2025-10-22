@@ -48,21 +48,30 @@ jobs:
     
     - name: Create test configuration
       run: |
-        python -c "
+        python3 << 'EOF'
         import json
-        with open('insider_config.json') as f:
-            config = json.load(f)
-        
-        # Modify for testing
-        config['api']['simulation_mode'] = True
-        config['alerts']['discord_webhook'] = ''
-        config['debug']['debug_mode'] = False
-        config['monitoring']['max_markets'] = 5
-        
-        with open('test_config.json', 'w') as f:
-            json.dump(config, f, indent=2)
-        print('✅ Test configuration created')
-        "
+        import sys
+
+        try:
+            # Load base configuration
+            with open('insider_config.json', 'r') as f:
+                config = json.load(f)
+
+            # Modify for testing
+            config['api']['simulation_mode'] = True
+            config['alerts']['discord_webhook'] = ''
+            config['debug']['debug_mode'] = False
+            config['monitoring']['max_markets'] = 5
+
+            # Save test configuration
+            with open('test_config.json', 'w') as f:
+                json.dump(config, f, indent=2)
+
+            print('✅ Test configuration created successfully')
+        except Exception as e:
+            print(f'❌ Error creating test config: {e}')
+            sys.exit(1)
+        EOF
     
     - name: Run linting
       run: |
