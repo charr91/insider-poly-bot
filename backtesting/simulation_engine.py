@@ -90,7 +90,7 @@ class SimulationEngine:
         detectors: Optional[Dict] = None,
         track_outcomes: bool = True,
         outcome_price_threshold: float = 0.05,
-        storage: Optional[HistoricalTradeStorage] = None
+        storage: Optional['HistoricalTradeStorage'] = None
     ):
         """
         Initialize simulation engine.
@@ -554,7 +554,7 @@ class SimulationEngine:
         self,
         market_state: MarketState,
         target_time: datetime,
-        storage: Optional[HistoricalTradeStorage] = None
+        storage: Optional['HistoricalTradeStorage'] = None
     ) -> Optional[float]:
         """
         Estimate market price at a specific time from trade history.
