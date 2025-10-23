@@ -1,5 +1,7 @@
 """
 Unit tests for AlertManager
+
+NOTE: Environment variables are mocked to prevent loading real credentials from .env
 """
 
 import pytest
@@ -11,8 +13,19 @@ from config.settings import Settings
 
 
 @pytest.fixture
-def mock_settings():
-    """Create mock settings for testing"""
+def mock_env():
+    """Mock environment variables to prevent loading real credentials"""
+    with patch.dict('os.environ', {
+        'DISCORD_WEBHOOK': '',
+        'TELEGRAM_BOT_TOKEN': '',
+        'TELEGRAM_CHAT_ID': ''
+    }, clear=False):
+        yield
+
+
+@pytest.fixture
+def mock_settings(mock_env):
+    """Create mock settings for testing (with mocked env vars)"""
     settings = Mock()
     settings.alerts = Mock()
     settings.alerts.discord_webhook = ""
@@ -23,8 +36,8 @@ def mock_settings():
 
 
 @pytest.fixture
-def mock_config():
-    """Create mock config dict for legacy support"""
+def mock_config(mock_env):
+    """Create mock config dict for legacy support (with mocked env vars)"""
     return {
         'alerts': {
             'discord_webhook': '',
@@ -178,25 +191,42 @@ class TestDiscordIntegration:
         """Test successful Discord webhook call"""
         mock_settings.alerts.discord_webhook = "https://discord.com/api/webhooks/test"
         am = AlertManager(mock_settings)
-        
+
+        # Create a mock recommendation
+        recommendation = {
+            'action': 'MONITOR',
+            'text': 'Monitor activity',
+            'reasoning': 'Volume spike detected'
+        }
+
         with patch('aiohttp.ClientSession.post') as mock_post:
             mock_response = AsyncMock()
             mock_response.status = 204
             mock_post.return_value.__aenter__.return_value = mock_response
-            
-            await am._send_discord_alert(sample_alert)
+
+            await am._send_discord_alert(sample_alert, recommendation)
             mock_post.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_discord_embed_creation(self, mock_settings, sample_alert):
-        """Test Discord embed creation"""
+        """Test Discord embed creation using formatter"""
         am = AlertManager(mock_settings)
-        embed = am._create_discord_embed(sample_alert)
-        
-        assert embed['title'] == '🚨 MEDIUM: Volume Spike'
-        assert embed['description'] == 'Test Market Question'
-        assert embed['color'] == 0xFFD700  # Gold for MEDIUM
+
+        # Create a mock recommendation
+        recommendation = {
+            'action': 'MONITOR',
+            'text': 'Monitor activity',
+            'reasoning': 'Volume spike detected'
+        }
+
+        # Test the formatter directly
+        embed = am.discord_formatter.format_alert(sample_alert, recommendation)
+
+        assert 'title' in embed
+        assert 'color' in embed
+        assert 'fields' in embed
         assert len(embed['fields']) > 0
+        assert embed['color'] == 0xFFD700  # Gold for MEDIUM
 
 
 class TestConnectionTesting:

@@ -1,0 +1,189 @@
+"""
+Unit tests for Alert Formatters (Discord and Telegram)
+"""
+
+import pytest
+from datetime import datetime
+from alerts.formatters import DiscordFormatter, TelegramFormatter
+from common import AlertType, AlertSeverity
+
+
+class TestDiscordFormatter:
+    """Test DiscordFormatter"""
+
+    @pytest.fixture
+    def formatter(self):
+        return DiscordFormatter()
+
+    @pytest.fixture
+    def sample_alert(self):
+        return {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k in 2025?',
+            'alert_type': AlertType.WHALE_ACTIVITY,
+            'timestamp': datetime.now().isoformat(),
+            'confidence_score': 12.0,
+            'analysis': {
+                'total_whale_volume': 150000,
+                'whale_count': 3,
+                'dominant_side': 'BUY',
+                'direction_imbalance': 0.9,
+                'whale_breakdown': {
+                    '0xabc123': {
+                        'total_volume': 75000,
+                        'dominant_side': 'BUY',
+                        'avg_price': 0.65
+                    }
+                }
+            },
+            'market_data': {
+                'volume24hr': 1000000,
+                'lastTradePrice': 0.65
+            }
+        }
+
+    @pytest.fixture
+    def sample_recommendation(self):
+        return {
+            'action': 'BUY',
+            'side': 'YES',
+            'price': 0.65,
+            'entry_price': 0.66,
+            'target_price': None,
+            'risk_price': 0.62,
+            'text': 'Consider YES Buy @ $0.65',
+            'reasoning': '3 whales purchased $150K YES with 90% buy bias. Strong conviction signal.',
+            'confidence_level': 'HIGH'
+        }
+
+    def test_format_alert_structure(self, formatter, sample_alert, sample_recommendation):
+        """Test that Discord embed has correct structure"""
+        market_url = "https://polymarket.com/event/bitcoin-100k-2025"
+        embed = formatter.format_alert(sample_alert, sample_recommendation, market_url)
+
+        assert 'title' in embed
+        assert 'color' in embed
+        assert 'fields' in embed
+        assert 'timestamp' in embed
+        assert 'footer' in embed
+
+        assert 'HIGH' in embed['title']
+        assert len(embed['fields']) > 0
+
+    def test_severity_colors(self, formatter, sample_alert, sample_recommendation):
+        """Test that severity levels map to correct colors"""
+        sample_alert['severity'] = 'CRITICAL'
+        embed_critical = formatter.format_alert(sample_alert, sample_recommendation)
+        assert embed_critical['color'] == 0xFF0000  # Red
+
+        sample_alert['severity'] = 'HIGH'
+        embed_high = formatter.format_alert(sample_alert, sample_recommendation)
+        assert embed_high['color'] == 0xFF8C00  # Dark orange
+
+        sample_alert['severity'] = 'MEDIUM'
+        embed_medium = formatter.format_alert(sample_alert, sample_recommendation)
+        assert embed_medium['color'] == 0xFFD700  # Gold
+
+    def test_recommendation_field(self, formatter, sample_alert, sample_recommendation):
+        """Test that recommendation is properly formatted"""
+        embed = formatter.format_alert(sample_alert, sample_recommendation)
+
+        # Find recommendation field
+        rec_field = next((f for f in embed['fields'] if 'RECOMMENDATION' in f['name']), None)
+        assert rec_field is not None
+        assert 'Consider YES Buy' in rec_field['value']
+
+
+class TestTelegramFormatter:
+    """Test TelegramFormatter"""
+
+    @pytest.fixture
+    def formatter(self):
+        return TelegramFormatter()
+
+    @pytest.fixture
+    def sample_alert(self):
+        return {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k in 2025?',
+            'alert_type': AlertType.WHALE_ACTIVITY,
+            'timestamp': datetime.now(),
+            'confidence_score': 12.0,
+            'analysis': {
+                'total_whale_volume': 150000,
+                'whale_count': 3,
+                'dominant_side': 'BUY',
+                'direction_imbalance': 0.9
+            },
+            'market_data': {
+                'volume24hr': 1000000,
+                'lastTradePrice': 0.65
+            }
+        }
+
+    @pytest.fixture
+    def sample_recommendation(self):
+        return {
+            'action': 'BUY',
+            'side': 'YES',
+            'price': 0.65,
+            'entry_price': 0.66,
+            'text': 'Consider YES Buy @ $0.65',
+            'reasoning': '3 whales purchased $150K YES with 90% buy bias.',
+            'confidence_level': 'HIGH'
+        }
+
+    def test_format_alert_html(self, formatter, sample_alert, sample_recommendation):
+        """Test that Telegram message uses HTML formatting"""
+        market_url = "https://polymarket.com/event/bitcoin-100k-2025"
+        message = formatter.format_alert(sample_alert, sample_recommendation, market_url)
+
+        assert '<b>' in message  # Bold tags
+        assert '</b>' in message
+        assert '<i>' in message or '</i>' in message or '<a href=' in message  # HTML formatting
+
+        assert 'HIGH SIGNAL' in message
+        assert 'RECOMMENDATION' in message
+        assert 'MARKET' in message
+        assert 'DETECTED' in message
+
+    def test_severity_emoji(self, formatter, sample_alert, sample_recommendation):
+        """Test that severity levels have correct emojis"""
+        sample_alert['severity'] = 'CRITICAL'
+        message_critical = formatter.format_alert(sample_alert, sample_recommendation)
+        assert '🔴' in message_critical
+
+        sample_alert['severity'] = 'HIGH'
+        message_high = formatter.format_alert(sample_alert, sample_recommendation)
+        assert '🟠' in message_high
+
+        sample_alert['severity'] = 'MEDIUM'
+        message_medium = formatter.format_alert(sample_alert, sample_recommendation)
+        assert '🟡' in message_medium
+
+    def test_market_url_link(self, formatter, sample_alert, sample_recommendation):
+        """Test that market URL is properly formatted as link"""
+        market_url = "https://polymarket.com/event/bitcoin-100k-2025"
+        message = formatter.format_alert(sample_alert, sample_recommendation, market_url)
+
+        assert market_url in message
+        assert 'View Market' in message
+
+    def test_confidence_score(self, formatter, sample_alert, sample_recommendation):
+        """Test that confidence score is displayed correctly"""
+        sample_alert['confidence_score'] = 12.0  # Should be 120/100 = 120%
+        message = formatter.format_alert(sample_alert, sample_recommendation)
+
+        assert 'CONFIDENCE' in message
+        # Confidence is scaled from 0-10 to 0-100, so 12.0 => 120/100
+        # But max is 10, so it should be displayed as 100/100
+        assert '/100' in message
+
+    def test_html_escaping(self, formatter, sample_alert, sample_recommendation):
+        """Test that special HTML characters are escaped"""
+        sample_alert['market_question'] = 'Question with <script> & "quotes"'
+        message = formatter.format_alert(sample_alert, sample_recommendation)
+
+        # Verify HTML is escaped
+        # This is basic check - html.escape() should handle this
+        assert '&lt;script&gt;' in message or '<script>' not in message

@@ -145,14 +145,19 @@ Core detection algorithm parameters organized by detection type.
 
 ### Alert Configuration (`alerts`)
 
-Controls notification settings and alert behavior.
+Controls notification settings and alert behavior across Discord and Telegram.
 
 ```json
 {
   "alerts": {
     "discord_webhook": "",
     "min_severity": "MEDIUM",
-    "max_alerts_per_hour": 10
+    "discord_min_severity": "MEDIUM",
+    "telegram_enabled": false,
+    "telegram_min_severity": "MEDIUM",
+    "max_alerts_per_hour": 10,
+    "include_transaction_links": true,
+    "include_wallet_addresses": true
   }
 }
 ```
@@ -160,8 +165,79 @@ Controls notification settings and alert behavior.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `discord_webhook` | string | `""` | Discord webhook URL for notifications (empty = disabled) |
-| `min_severity` | string | `"MEDIUM"` | Minimum severity level: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
-| `max_alerts_per_hour` | number | `10` | Rate limit for alerts to prevent spam |
+| `min_severity` | string | `"MEDIUM"` | Global minimum severity level for all channels |
+| `discord_min_severity` | string | `"MEDIUM"` | Minimum severity level for Discord: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
+| `telegram_enabled` | boolean | `false` | Enable/disable Telegram notifications (requires bot token and chat ID in `.env`) |
+| `telegram_min_severity` | string | `"MEDIUM"` | Minimum severity level for Telegram: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
+| `max_alerts_per_hour` | number | `10` | Rate limit for alerts across all channels to prevent spam |
+| `include_transaction_links` | boolean | `true` | Include Polygonscan transaction links in alerts |
+| `include_wallet_addresses` | boolean | `true` | Include wallet addresses in whale/coordination alerts |
+
+**New Features:**
+- **Actionable Recommendations**: Alerts now include specific trading recommendations (e.g., "Consider YES Buy @ $0.65") based on signal strength and confidence
+- **Market Links**: Direct links to Polymarket event pages
+- **Transaction Details**: Polygonscan links to relevant transactions and wallet addresses
+- **Enhanced Formatting**: Clean, professional alert layout following best practices
+- **Multi-Platform**: Send to Discord, Telegram, or both simultaneously
+
+#### Testing Alert Connections
+
+Test your alert system configuration with the CLI command:
+
+```bash
+# Test alert connections (sends actual test messages)
+insider-bot alerts test
+```
+
+This command will:
+1. **Show Configuration Status**: Display which channels are configured (Discord/Telegram)
+2. **Send Test Messages**: Send actual test alerts to each configured channel
+3. **Report Results**: Show success/failure for each channel with detailed feedback
+4. **Provide Guidance**: Display setup instructions if channels aren't configured
+
+**Example Output:**
+```
+🧪 Testing Alert System Connections
+
+┌─ Alert Channel Configuration ─────────────────────────┐
+│ Channel  │    Status     │ Details                    │
+├──────────┼───────────────┼────────────────────────────┤
+│ Discord  │ ✓ Configured  │ https://discord.com/api... │
+│ Telegram │ ✓ Configured  │ Chat ID: 7182973735        │
+└──────────┴───────────────┴────────────────────────────┘
+
+Sending Test Messages...
+
+✅ Discord: Test message sent successfully
+✅ Telegram: Test message sent successfully
+
+✅ All 2 configured channel(s) working!
+```
+
+**Setup Requirements:**
+
+**For Discord:**
+```bash
+# Add to .env file:
+DISCORD_WEBHOOK=https://discord.com/api/webhooks/your_webhook_url_here
+```
+
+**For Telegram:**
+```bash
+# Add to .env file:
+TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz  # From @BotFather
+TELEGRAM_CHAT_ID=your_chat_id_here                         # From getUpdates API
+
+# Steps to get Telegram credentials:
+# 1. Create bot: Message @BotFather on Telegram and use /newbot command
+# 2. Get chat ID: Message your bot, then visit:
+#    https://api.telegram.org/bot<YourBOTToken>/getUpdates
+```
+
+**Troubleshooting:**
+- **Discord fails**: Verify webhook URL is correct and not expired
+- **Telegram fails**: Ensure both bot token AND chat ID are set
+- **No channels configured**: Add credentials to `.env` file and retry
 
 ### Debug Configuration (`debug`)
 
@@ -334,12 +410,14 @@ Some sensitive configuration should be stored in `.env` file:
 POLYMARKET_API_KEY=your_api_key_here
 POLYMARKET_SECRET=your_secret_here
 
-# Discord Webhook (optional - for alerts)
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your_webhook_url
+# Discord Webhook (for alerts)
+DISCORD_WEBHOOK=https://discord.com/api/webhooks/your_webhook_url
 
-# Additional API keys for enhanced features
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-EMAIL_API_KEY=your_email_service_api_key
+# Telegram Bot Configuration (for alerts)
+# Get bot token from @BotFather on Telegram
+# Get chat ID by messaging your bot and visiting: https://api.telegram.org/bot<YourBOTToken>/getUpdates
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 ```
 
 ## ⚠️ Important Notes

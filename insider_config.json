@@ -41,7 +41,11 @@
     "discord_webhook": "https://discord.com/api/webhooks/1415560438149546024/nroI9V2fg_2Uy-owUg4Lsyk9hOufENaq9xO5O6eInDuj9ad00DUuAttSsTQw7R4OTctd",
     "min_severity": "MEDIUM",
     "discord_min_severity": "MEDIUM",
-    "max_alerts_per_hour": 10
+    "telegram_enabled": true,
+    "telegram_min_severity": "MEDIUM",
+    "max_alerts_per_hour": 10,
+    "include_transaction_links": true,
+    "include_wallet_addresses": true
   },
   "debug": {
     "debug_mode": true,

@@ -57,19 +57,23 @@ class MarketMonitor:
         self.price_detector = PriceDetector(self.config)
         self.coordination_detector = CoordinationDetector(self.config)
 
+        # Market data storage (must be initialized before AlertManager)
+        self.monitored_markets = {}
+        self.market_baselines = {}
+        self.trade_history = {}
+        self.token_to_outcome = {}  # Maps token ID to "Yes" or "No"
+
         # Initialize persistence layer
         self.alert_storage = DatabaseAlertStorage(self.db_manager)
         self.whale_tracker = WhaleTracker(self.db_manager)
         self.outcome_tracker = OutcomeTracker(self.db_manager, self.data_api)
 
-        # Initialize alert manager with database storage
-        self.alert_manager = AlertManager(self.settings, storage=self.alert_storage)
-        
-        # Market data storage
-        self.monitored_markets = {}
-        self.market_baselines = {}
-        self.trade_history = {}
-        self.token_to_outcome = {}  # Maps token ID to "Yes" or "No"
+        # Initialize alert manager with database storage and token mapping
+        self.alert_manager = AlertManager(
+            self.settings,
+            storage=self.alert_storage,
+            token_to_outcome=self.token_to_outcome
+        )
         
         # Cross-market activity tracking for context filtering
         self.recent_market_activities = {}

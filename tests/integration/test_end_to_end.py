@@ -6,6 +6,8 @@ Tests the complete flow:
 2. Whale tracking from alerts
 3. Outcome tracking initialization
 4. Price outcome updates
+
+NOTE: HTTP calls to Discord/Telegram are mocked to prevent spam
 """
 
 import pytest
@@ -13,6 +15,7 @@ import pytest_asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from database import DatabaseManager, AlertRepository, WhaleRepository, OutcomeRepository
 from persistence.alert_storage import DatabaseAlertStorage
@@ -20,6 +23,32 @@ from persistence.whale_tracker import WhaleTracker
 from persistence.outcome_tracker import OutcomeTracker
 from data_sources.data_api_client import DataAPIClient
 from alerts.alert_manager import AlertManager
+
+
+@pytest.fixture
+def mock_http():
+    """Mock HTTP calls to prevent real Discord/Telegram messages"""
+
+    def create_mock_response(url, **kwargs):
+        """Create appropriate mock response based on URL"""
+        mock_response = MagicMock()
+
+        if 'discord.com' in url:
+            # Discord webhook response
+            mock_response.status = 204
+            mock_response.text = AsyncMock(return_value='')
+        else:
+            # Telegram API response
+            mock_response.status = 200
+            mock_response.text = AsyncMock(return_value='{"ok": true}')
+            mock_response.json = AsyncMock(return_value={"ok": True})
+
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+        return mock_response
+
+    with patch('aiohttp.ClientSession.post', side_effect=create_mock_response) as mock:
+        yield mock
 
 
 @pytest_asyncio.fixture
@@ -46,7 +75,7 @@ async def test_db():
 
 
 @pytest.mark.asyncio
-async def test_end_to_end_alert_flow(test_db):
+async def test_end_to_end_alert_flow(test_db, mock_http):
     """Test complete alert → whale → outcome flow"""
 
     # Setup components
@@ -153,7 +182,7 @@ async def test_end_to_end_alert_flow(test_db):
 
 
 @pytest.mark.asyncio
-async def test_market_maker_detection_integration(test_db):
+async def test_market_maker_detection_integration(test_db, mock_http):
     """Test MM detection through multiple trades"""
 
     whale_tracker = WhaleTracker(test_db)
@@ -188,7 +217,7 @@ async def test_market_maker_detection_integration(test_db):
 
 
 @pytest.mark.asyncio
-async def test_alert_manager_with_database_storage(test_db):
+async def test_alert_manager_with_database_storage(test_db, mock_http):
     """Test AlertManager with database storage backend"""
 
     alert_storage = DatabaseAlertStorage(test_db)

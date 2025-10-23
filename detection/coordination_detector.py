@@ -40,13 +40,15 @@ class CoordinationDetector(DetectorBase):
                 size = float(trade.get('size', trade.get('amount', trade.get('shares', 1))))
                 side = trade.get('side', trade.get('type', 'BUY')).upper()
                 maker = trade.get('maker', trade.get('trader', trade.get('user', 'unknown')))
-                
+                asset_id = trade.get('asset_id', trade.get('assetId', trade.get('token_id', None)))
+
                 if timestamp and maker != 'unknown':
                     normalized_trades.append({
                         'timestamp': timestamp,
                         'size': size,
                         'side': side,
-                        'maker': maker
+                        'maker': maker,
+                        'asset_id': asset_id
                     })
             except (ValueError, TypeError):
                 continue
@@ -143,6 +145,13 @@ class CoordinationDetector(DetectorBase):
         
         coordination_score = sum(coordination_indicators) / len(coordination_indicators)
         
+        # Determine most common asset_id being traded
+        most_common_asset_id = None
+        if 'asset_id' in window_trades.columns:
+            asset_counts = window_trades['asset_id'].value_counts()
+            if len(asset_counts) > 0:
+                most_common_asset_id = asset_counts.index[0]
+
         return {
             'coordination_score': coordination_score,
             'unique_wallets': unique_wallets,
@@ -150,6 +159,7 @@ class CoordinationDetector(DetectorBase):
             'directional_bias': directional_bias,
             'buy_wallets': buy_wallets,
             'sell_wallets': sell_wallets,
+            'asset_id': most_common_asset_id,  # Most traded asset in coordinated activity
             'timing_analysis': time_clustering,
             'size_analysis': size_analysis,
             'wallet_diversity': wallet_diversity,

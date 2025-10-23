@@ -18,9 +18,11 @@ A sophisticated bot that monitors Polymarket trading activity to identify potent
 ## ✨ Key Features
 
 - **📊 Real-time Market Monitoring**: Live WebSocket connection for instant trade data
-- **🔍 Multi-Algorithm Detection**: Volume spikes, whale detection, price movement analysis, and coordination detection  
+- **🔍 Multi-Algorithm Detection**: Volume spikes, whale detection, price movement analysis, and coordination detection
 - **⚡ Advanced Pattern Recognition**: Statistical analysis using Z-scores, volatility measurements, and momentum indicators
-- **🔔 Smart Alerting**: Configurable Discord notifications with severity levels
+- **🔔 Smart Alerting**: Actionable trading recommendations with Discord & Telegram support
+- **🎯 Intelligent Recommendations**: Context-aware buy/sell/monitor recommendations based on signal strength and confidence
+- **🔗 Market Integration**: Direct links to Polymarket events and Polygonscan transactions in alerts
 - **🌐 Modular Architecture**: Separate data sources, detection algorithms, and alert systems
 - **📈 Comprehensive Analytics**: Detailed logging and activity reporting
 - **⚙️ Flexible Configuration**: Extensive customization through JSON configuration
@@ -29,7 +31,10 @@ A sophisticated bot that monitors Polymarket trading activity to identify potent
 
 - **Python 3.8+** (Python 3.10+ recommended)
 - **API Access**: Polymarket CLOB API access (optional for enhanced features)
-- **Discord Webhook** (optional for alerts)
+- **Discord Webhook** (optional - for Discord alerts)
+- **Telegram Bot** (optional - for Telegram alerts)
+  - Create bot via [@BotFather](https://t.me/BotFather) on Telegram
+  - Get your chat ID by messaging the bot and visiting: `https://api.telegram.org/bot<YourBOTToken>/getUpdates`
 
 ## 📦 Installation
 
@@ -376,6 +381,9 @@ insider-bot whales list --min-volume 50000
 ### Alert Commands
 
 ```bash
+# Test alert system connections (sends test messages)
+insider-bot alerts test
+
 # Show recent alerts (last 24 hours)
 insider-bot alerts recent --hours 24
 
@@ -388,6 +396,49 @@ insider-bot alerts show 123
 # Get all alerts for a market
 insider-bot alerts by-market <market-id>
 ```
+
+#### Testing Alert Connections
+
+The `alerts test` command tests your Discord and Telegram alert configurations by sending actual test messages:
+
+```bash
+# Test with default config
+insider-bot alerts test
+
+# Test with custom config file
+insider-bot alerts test --config my_config.json
+```
+
+**What it does:**
+- Shows which alert channels are configured
+- Sends a test message to each configured channel
+- Displays detailed results for each channel
+- Provides setup instructions if no channels are configured
+
+**Example Output:**
+```
+🧪 Testing Alert System Connections
+
+┌─ Alert Channel Configuration ─────────────────────────┐
+│ Channel  │    Status     │ Details                    │
+├──────────┼───────────────┼────────────────────────────┤
+│ Discord  │ ✓ Configured  │ https://discord.com/api... │
+│ Telegram │ ✓ Configured  │ Chat ID: 7182973735        │
+└──────────┴───────────────┴────────────────────────────┘
+
+Sending Test Messages...
+
+✅ Discord: Test message sent successfully
+✅ Telegram: Test message sent successfully
+
+✅ All 2 configured channel(s) working!
+```
+
+**Prerequisites:**
+- Discord: Set `DISCORD_WEBHOOK` in `.env` file
+- Telegram: Set both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` file
+
+See [CONFIGURATION.md](CONFIGURATION.md#alert-configuration) for detailed setup instructions.
 
 ### Statistics Commands
 

@@ -5,6 +5,7 @@ Usage:
     insider-bot alerts recent [--hours N] [--severity LEVEL]
     insider-bot alerts show <alert-id>
     insider-bot alerts by-market <market-id>
+    insider-bot alerts test [--config CONFIG]
 """
 
 import click
@@ -14,8 +15,13 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 from datetime import datetime
+import json
+from pathlib import Path
+from dotenv import load_dotenv
 
 from database import DatabaseManager, AlertRepository
+from alerts.alert_manager import AlertManager
+from config.settings import Settings
 
 console = Console()
 
@@ -169,3 +175,127 @@ async def _alerts_by_market_async(db_path, market_id, limit):
             console.print(f"  [{alert.severity}] {alert.alert_type} - {time_str} (Confidence: {alert.confidence_score:.1f})")
 
         console.print(f"\n[dim]Total: {len(alerts)} alert(s)[/dim]")
+
+
+@alerts.command('test')
+@click.option('--config', default='insider_config.json', help='Path to configuration file')
+@click.pass_context
+def test_alerts(ctx, config):
+    """Test Discord and Telegram alert connections"""
+    asyncio.run(_test_alerts_async(config))
+
+
+async def _test_alerts_async(config_path):
+    """Async implementation of test alerts"""
+    # Load environment variables
+    load_dotenv()
+
+    # Load configuration
+    try:
+        config_file = Path(config_path)
+        if not config_file.exists():
+            console.print(f"[red]Config file not found: {config_path}[/red]")
+            return
+
+        with open(config_file) as f:
+            config = json.load(f)
+    except Exception as e:
+        console.print(f"[red]Failed to load config: {e}[/red]")
+        return
+
+    # Create settings and alert manager
+    try:
+        settings = Settings(config)
+        alert_manager = AlertManager(settings)
+
+        console.print("\n[bold cyan]🧪 Testing Alert System Connections[/bold cyan]\n")
+
+        # Show configuration status
+        table = Table(title="Alert Channel Configuration", box=box.ROUNDED)
+        table.add_column("Channel", style="cyan")
+        table.add_column("Status", justify="center")
+        table.add_column("Details", style="dim")
+
+        # Discord configuration
+        if alert_manager.discord_webhook:
+            webhook_preview = alert_manager.discord_webhook[:50] + "..." if len(alert_manager.discord_webhook) > 50 else alert_manager.discord_webhook
+            table.add_row("Discord", "[green]✓ Configured[/green]", webhook_preview)
+        else:
+            table.add_row("Discord", "[yellow]✗ Not configured[/yellow]", "No webhook set")
+
+        # Telegram configuration
+        if alert_manager.telegram_notifier.is_enabled():
+            bot_info = alert_manager.telegram_notifier.get_bot_info()
+            table.add_row("Telegram", "[green]✓ Configured[/green]", f"Chat ID: {bot_info['chat_id']}")
+        else:
+            table.add_row("Telegram", "[yellow]✗ Not configured[/yellow]", "Missing bot token or chat ID")
+
+        console.print(table)
+
+        # Test connections
+        console.print("\n[bold]Sending Test Messages...[/bold]\n")
+
+        discord_success = False
+        telegram_success = False
+
+        # Test Discord
+        if alert_manager.discord_webhook:
+            try:
+                import aiohttp
+                test_embed = {
+                    "title": "🧪 Test Alert",
+                    "description": "Polymarket Insider Bot - Alert System Test",
+                    "color": 0x00FF00,  # Green
+                    "timestamp": datetime.now().isoformat(),
+                    "footer": {"text": "This is a test message"}
+                }
+
+                async with aiohttp.ClientSession() as session:
+                    payload = {"embeds": [test_embed]}
+                    async with session.post(alert_manager.discord_webhook, json=payload, timeout=10) as resp:
+                        if resp.status in [200, 204]:
+                            console.print("[green]✅ Discord:[/green] Test message sent successfully")
+                            discord_success = True
+                        else:
+                            response_text = await resp.text()
+                            console.print(f"[red]❌ Discord:[/red] HTTP {resp.status}")
+                            console.print(f"   [dim]{response_text[:200]}[/dim]")
+            except Exception as e:
+                console.print(f"[red]❌ Discord:[/red] {str(e)}")
+
+        # Test Telegram
+        if alert_manager.telegram_notifier.is_enabled():
+            try:
+                result = await alert_manager.telegram_notifier.test_connection()
+                if result:
+                    console.print("[green]✅ Telegram:[/green] Test message sent successfully")
+                    telegram_success = True
+                else:
+                    console.print("[red]❌ Telegram:[/red] Test failed (see logs)")
+            except Exception as e:
+                console.print(f"[red]❌ Telegram:[/red] {str(e)}")
+
+        # Summary
+        console.print()
+        configured_count = sum([
+            bool(alert_manager.discord_webhook),
+            alert_manager.telegram_notifier.is_enabled()
+        ])
+        success_count = sum([discord_success, telegram_success])
+
+        if configured_count == 0:
+            console.print("[yellow]⚠️  No alert channels configured![/yellow]")
+            console.print("\n[dim]To configure alerts:[/dim]")
+            console.print("[dim]  1. Add DISCORD_WEBHOOK to your .env file, or[/dim]")
+            console.print("[dim]  2. Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to your .env file[/dim]")
+        elif success_count == configured_count:
+            console.print(f"[green bold]✅ All {configured_count} configured channel(s) working![/green bold]")
+        elif success_count > 0:
+            console.print(f"[yellow]⚠️  {success_count}/{configured_count} channel(s) working[/yellow]")
+        else:
+            console.print(f"[red]❌ All configured channels failed[/red]")
+
+    except Exception as e:
+        console.print(f"\n[red]❌ Error testing alerts: {e}[/red]")
+        import traceback
+        traceback.print_exc()

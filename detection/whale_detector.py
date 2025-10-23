@@ -81,14 +81,24 @@ class WhaleDetector(DetectorBase):
     
     def _analyze_whale_patterns(self, whale_trades: pd.DataFrame, all_trades: pd.DataFrame) -> Dict:
         """Analyze patterns in whale trading activity"""
-        # Group by wallet address
-        whale_breakdown = whale_trades.groupby('maker').agg({
+        # Build aggregation dict
+        agg_dict = {
             'volume_usd': ['sum', 'count', 'mean'],
             'side': lambda x: x.mode().iloc[0] if len(x) > 0 else 'BUY'
-        }).round(2)
-        
+        }
+
+        # Add asset_id aggregation only if it exists in the data
+        if 'asset_id' in whale_trades.columns:
+            agg_dict['asset_id'] = lambda x: x.mode().iloc[0] if len(x) > 0 else (x.iloc[0] if len(x) > 0 else None)
+
+        # Group by wallet address
+        whale_breakdown = whale_trades.groupby('maker').agg(agg_dict).round(2)
+
         # Flatten column names
-        whale_breakdown.columns = ['total_volume', 'trade_count', 'avg_trade_size', 'preferred_side']
+        if 'asset_id' in whale_trades.columns:
+            whale_breakdown.columns = ['total_volume', 'trade_count', 'avg_trade_size', 'preferred_side', 'asset_id']
+        else:
+            whale_breakdown.columns = ['total_volume', 'trade_count', 'avg_trade_size', 'preferred_side']
         
         # Sort by total volume
         top_whales = whale_breakdown.nlargest(10, 'total_volume')

@@ -118,20 +118,13 @@ def setup_test_logging():
     logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 
-# Skip only Discord integration tests by default (they require real webhooks)
-def pytest_runtest_setup(item):
-    """Setup hook to handle test execution"""
-    # Skip only Discord integration tests that require real external services
-    if "integration" in item.keywords and "discord" in str(item.fspath).lower():
-        if not item.config.getoption("--run-integration"):
-            pytest.skip("Discord integration tests disabled (use --run-integration to enable)")
-
-
+# Integration tests now use mocked HTTP, so they can run by default without external services
+# The --run-integration flag is kept for backwards compatibility but is no longer required
 def pytest_addoption(parser):
     """Add command line options"""
     parser.addoption(
         "--run-integration",
         action="store_true",
         default=False,
-        help="Run integration tests (requires external services)"
+        help="(Deprecated) Integration tests now use mocked HTTP by default"
     )
