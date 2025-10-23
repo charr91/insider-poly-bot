@@ -23,7 +23,7 @@ services:
 
     # Resource limits (adjust based on your VPS capacity)
     # Note: For docker-compose v1, use --compatibility flag or remove these limits
-    mem_limit: 1g
+    mem_limit: 2g
     cpus: 1.0
     # deploy:
     #   resources:

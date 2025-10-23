@@ -298,8 +298,8 @@ class OutcomeTracker:
             Current price or None if unavailable
         """
         try:
-            # Use data API client to fetch market data
-            market_data = await self.data_api.get_market_trades(market_id, limit=1)
+            # Use data API client to fetch market data (not async)
+            market_data = self.data_api.get_market_trades(market_id, limit=1)
 
             if not market_data:
                 return None

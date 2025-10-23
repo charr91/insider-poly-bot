@@ -168,11 +168,20 @@ class MarketMonitor:
             asyncio.create_task(self._trade_polling_loop(), name="trade_polling"),  # Real-time trade polling
             asyncio.create_task(self._outcome_update_loop(), name="outcome_updates")  # Outcome tracking updates
         ]
-        
+
         try:
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks, return_exceptions=True)
+            # If we reach here, one or more tasks completed unexpectedly
+            logger.error("❌ CRITICAL: One or more monitoring tasks completed unexpectedly!")
+            for task in tasks:
+                if task.done():
+                    task_name = task.get_name()
+                    if task.exception():
+                        logger.error(f"Task '{task_name}' failed with exception: {task.exception()}")
+                    else:
+                        logger.error(f"Task '{task_name}' completed without exception (unexpected)")
         except Exception as e:
-            logger.error(f"Error in monitoring tasks: {e}")
+            logger.error(f"Error in monitoring tasks: {e}", exc_info=True)
         finally:
             await self.stop_monitoring()
     
