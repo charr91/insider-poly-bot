@@ -523,21 +523,6 @@ class MarketMonitor:
         api_status_text = "Operational" if api_operational else "Failed"
         print(format_line(f"{Fore.CYAN}Data API:{Style.RESET_ALL} {api_status_color}{api_status_text}{Style.RESET_ALL}"))
 
-        # Memory profiling
-        if tracemalloc.is_tracing():
-            current, peak = tracemalloc.get_traced_memory()
-            print(format_line(f"{Fore.CYAN}Memory:{Style.RESET_ALL} {current / 1024 / 1024:.1f} MB current, {peak / 1024 / 1024:.1f} MB peak"))
-
-            # Log top 3 memory allocations with traceback
-            snapshot = tracemalloc.take_snapshot()
-            top_stats = snapshot.statistics('traceback')[:3]
-            logger.info("Top 3 memory allocations:")
-            for i, stat in enumerate(top_stats, 1):
-                logger.info(f"  #{i}: {stat}")
-                logger.info(f"      Traceback:")
-                for line in stat.traceback.format():
-                    logger.info(f"        {line}")
-
         print(f"{Fore.BLUE}└{'─' * 58}┘{Style.RESET_ALL}\n")
     
     def _handle_realtime_trade(self, trade_data: Dict):
@@ -606,7 +591,7 @@ class MarketMonitor:
                     poll_count += 1
                     try:
                         # Get recent trades - only for monitored markets (increased limit for better data quality)
-                        recent_trades = self.data_api.get_recent_trades(market_ids, limit=500)
+                        recent_trades = await self.data_api.get_recent_trades(market_ids, limit=500)
 
                         # Filter for trades newer than last poll
                         new_trades = []
@@ -789,7 +774,7 @@ class MarketMonitor:
         # Prioritize Data API since WebSocket is having issues
         try:
             # Get recent trades first (increased limit for better analysis)
-            recent_trades = self.data_api.get_recent_trades([market_id], limit=VolumeConstants.MAX_TRADES_PER_REQUEST)
+            recent_trades = await self.data_api.get_recent_trades([market_id], limit=VolumeConstants.MAX_TRADES_PER_REQUEST)
             trades.extend(recent_trades)
             logger.debug(f"Fetched {len(recent_trades)} recent trades for {market_id[:10]}...")
         except Exception as e:

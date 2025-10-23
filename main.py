@@ -7,13 +7,9 @@ Uses modular architecture with WebSocket + Data API approach
 import asyncio
 import logging
 import sys
-import tracemalloc
 from pathlib import Path
 from colorama import init, Fore, Back, Style
 from dotenv import load_dotenv
-
-# Start memory tracking with 25 frame depth to capture full call stacks
-tracemalloc.start(25)
 
 # Load environment variables from .env file
 load_dotenv()

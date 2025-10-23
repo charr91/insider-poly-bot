@@ -80,34 +80,33 @@ class VolumeDetector(DetectorBase):
         time_baselines = {}
         
         try:
-            # Hour-of-day baselines (0-23)
-            hourly_with_hour = hourly.copy()
-            hourly_with_hour['hour'] = hourly_with_hour.index.hour
-            hour_baselines = hourly_with_hour.groupby('hour')['volume_usd'].agg(['mean', 'std']).to_dict('index')
-            
-            # Convert to more readable format
+            # Hour-of-day baselines (0-23) - optimized with single copy and direct iteration
+            hourly_enhanced = hourly.copy()  # Single copy for all operations
+            hourly_enhanced['hour'] = hourly_enhanced.index.hour
+            hour_grouped = hourly_enhanced.groupby('hour')['volume_usd'].agg(['mean', 'std'])
+
+            # Direct iteration instead of to_dict + comprehension
             time_baselines['hourly_patterns'] = {
                 str(hour): {
-                    'avg_volume': stats['mean'],
-                    'std_volume': stats['std'] if pd.notna(stats['std']) else 0
+                    'avg_volume': row['mean'],
+                    'std_volume': row['std'] if pd.notna(row['std']) else 0
                 }
-                for hour, stats in hour_baselines.items()
+                for hour, row in hour_grouped.iterrows()
             }
-            
-            # Day-of-week baselines (0=Monday, 6=Sunday)  
+
+            # Day-of-week baselines (0=Monday, 6=Sunday)
             if len(hourly) > 24:  # Need at least a day of data
-                hourly_with_dow = hourly.copy()
-                hourly_with_dow['dow'] = hourly_with_dow.index.dayofweek
-                dow_baselines = hourly_with_dow.groupby('dow')['volume_usd'].agg(['mean', 'std']).to_dict('index')
-                
-                # Convert to readable format
+                hourly_enhanced['dow'] = hourly_enhanced.index.dayofweek
+                dow_grouped = hourly_enhanced.groupby('dow')['volume_usd'].agg(['mean', 'std'])
+
+                # Direct iteration - optimized
                 day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
                 time_baselines['daily_patterns'] = {
                     day_names[dow]: {
-                        'avg_volume': stats['mean'],
-                        'std_volume': stats['std'] if pd.notna(stats['std']) else 0
+                        'avg_volume': row['mean'],
+                        'std_volume': row['std'] if pd.notna(row['std']) else 0
                     }
-                    for dow, stats in dow_baselines.items() if dow < len(day_names)
+                    for dow, row in dow_grouped.iterrows() if dow < len(day_names)
                 }
             
             # Calculate percentile-based thresholds for more robust detection
