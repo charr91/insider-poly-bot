@@ -431,3 +431,212 @@ class TestDirectionDisplay:
 
         # Should show clear message about unknown outcome
         assert '80% SELL pressure (outcome unknown)' in result
+
+    def test_clear_outcome_balanced_pressure_discord(self):
+        """Test Discord formatter shows 'Pressure: Balanced' when outcome is clear but pressure is balanced."""
+        from datetime import timezone
+
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will 8+ Fed rate cuts happen in 2025?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 9.0,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'analysis': {
+                'max_anomaly_score': 122.5,
+                'dominant_outcome': 'NO',
+                'dominant_side': 'BUY',
+                'outcome_imbalance': 1.0,  # 100% = all volume on NO
+                'side_imbalance': 0.05      # 5% = balanced BUY/SELL
+            },
+            'market_data': {
+                'volume24hr': 40000,
+                'lastTradePrice': 0.0035,
+                'outcomePrices': ['0.0035', '0.9965']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = DiscordFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Find detected field
+        detected_field = next((f for f in result['fields'] if 'DETECTED' in f['name']), None)
+        assert detected_field is not None
+        # Should show clear outcome
+        assert '100% NO' in detected_field['value']
+        # Should show "Pressure: Balanced" instead of hiding it
+        assert '**Pressure:** Balanced' in detected_field['value']
+        # Should NOT show low percentage
+        assert '5% BUY' not in detected_field['value']
+
+    def test_clear_outcome_balanced_pressure_telegram(self):
+        """Test Telegram formatter shows 'Pressure: Balanced' when outcome is clear but pressure is balanced."""
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will 8+ Fed rate cuts happen in 2025?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 9.0,
+            'timestamp': datetime.now(),
+            'analysis': {
+                'max_anomaly_score': 122.5,
+                'dominant_outcome': 'NO',
+                'dominant_side': 'BUY',
+                'outcome_imbalance': 1.0,  # 100% = all volume on NO
+                'side_imbalance': 0.05      # 5% = balanced BUY/SELL
+            },
+            'market_data': {
+                'volume24hr': 40000,
+                'lastTradePrice': 0.0035,
+                'outcomePrices': ['0.0035', '0.9965']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = TelegramFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Should show clear outcome
+        assert '100% NO' in result
+        # Should show "Pressure: Balanced" instead of hiding it
+        assert '<b>Pressure:</b> Balanced' in result
+        # Should NOT show low percentage
+        assert '5% BUY' not in result
+
+
+class TestScoreVolatilityDisplay:
+    """Test score and volatility display formatting"""
+
+    def test_volume_spike_score_format_discord(self):
+        """Test that Discord formatter shows clean score format (no 'normal' text)."""
+        from datetime import timezone
+
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 8.0,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'analysis': {
+                'max_anomaly_score': 4.6,
+                'dominant_outcome': 'YES',
+                'dominant_side': 'BUY',
+                'outcome_imbalance': 0.75,
+                'side_imbalance': 0.80
+            },
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.65,
+                'outcomePrices': ['0.65', '0.35']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = DiscordFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Find detected field
+        detected_field = next((f for f in result['fields'] if 'DETECTED' in f['name']), None)
+        assert detected_field is not None
+        # Should show "4.6x" without "normal" text
+        assert '4.6x' in detected_field['value']
+        assert 'normal' not in detected_field['value']
+
+    def test_volume_spike_score_format_telegram(self):
+        """Test that Telegram formatter shows clean score format (no 'normal' text)."""
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 8.0,
+            'timestamp': datetime.now(),
+            'analysis': {
+                'max_anomaly_score': 4.6,
+                'dominant_outcome': 'YES',
+                'dominant_side': 'BUY',
+                'outcome_imbalance': 0.75,
+                'side_imbalance': 0.80
+            },
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.65,
+                'outcomePrices': ['0.65', '0.35']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = TelegramFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Should show "4.6x" without "normal" text
+        assert '4.6x' in result
+        assert 'normal' not in result.lower()
+
+    def test_price_movement_volatility_format_discord(self):
+        """Test that Discord formatter shows clean volatility format (no 'normal' text)."""
+        from datetime import timezone
+
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k?',
+            'alert_type': AlertType.UNUSUAL_PRICE_MOVEMENT,
+            'confidence_score': 7.5,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'analysis': {
+                'analysis': {
+                    'price_change_pct': 15.3,
+                    'volatility_spike': 2.8
+                }
+            },
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.75,
+                'outcomePrices': ['0.75', '0.25']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = DiscordFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Find detected field
+        detected_field = next((f for f in result['fields'] if 'DETECTED' in f['name']), None)
+        assert detected_field is not None
+        # Should show "2.8x" without "normal" text
+        assert '2.8x' in detected_field['value']
+        assert 'normal' not in detected_field['value']
+
+    def test_price_movement_volatility_format_telegram(self):
+        """Test that Telegram formatter shows clean volatility format (no 'normal' text)."""
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k?',
+            'alert_type': AlertType.UNUSUAL_PRICE_MOVEMENT,
+            'confidence_score': 7.5,
+            'timestamp': datetime.now(),
+            'analysis': {
+                'analysis': {
+                    'price_change_pct': 15.3,
+                    'volatility_spike': 2.8
+                }
+            },
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.75,
+                'outcomePrices': ['0.75', '0.25']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = TelegramFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Should show "2.8x" without "normal" text
+        assert '2.8x' in result
+        assert 'normal' not in result.lower()

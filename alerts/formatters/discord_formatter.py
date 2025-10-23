@@ -160,7 +160,7 @@ class DiscordFormatter:
         # Add type-specific metrics
         if alert_type_str == 'VOLUME_SPIKE':
             anomaly_score = analysis.get('max_anomaly_score', 0)
-            lines.append(f"**Score:** {anomaly_score:.1f}x normal")
+            lines.append(f"**Score:** {anomaly_score:.1f}x")
 
             # Add directional information if available
             dominant_outcome = analysis.get('dominant_outcome', 'UNKNOWN')
@@ -173,9 +173,12 @@ class DiscordFormatter:
             if dominant_outcome != 'UNKNOWN' and outcome_imbalance >= 0.10:
                 # We have outcome data and clear direction
                 lines.append(f"**Outcome:** {outcome_imbalance*100:.0f}% {dominant_outcome}")
-                # Also show pressure if meaningful
-                if dominant_side != 'UNKNOWN' and side_imbalance >= 0.10:
-                    lines.append(f"**Pressure:** {side_imbalance*100:.0f}% {dominant_side}")
+                # Also show pressure
+                if dominant_side != 'UNKNOWN':
+                    if side_imbalance >= 0.10:
+                        lines.append(f"**Pressure:** {side_imbalance*100:.0f}% {dominant_side}")
+                    else:
+                        lines.append(f"**Pressure:** Balanced")
             else:
                 # No outcome data - show pressure with clarification
                 if dominant_side != 'UNKNOWN':
@@ -199,7 +202,7 @@ class DiscordFormatter:
             volatility_spike = price_analysis.get('volatility_spike', 1)
 
             lines.append(f"**Change:** {price_change_pct:+.1f}%")
-            lines.append(f"**Volatility:** {volatility_spike:.1f}x normal")
+            lines.append(f"**Volatility:** {volatility_spike:.1f}x")
 
         elif alert_type_str == 'COORDINATED_TRADING':
             coord_score = analysis.get('coordination_score', 0)
