@@ -220,12 +220,12 @@ def create_consistent_early_return(
 ) -> Dict[str, Any]:
     """
     Create a consistent structure for early returns from detector methods.
-    
+
     Args:
         anomaly: Whether an anomaly was detected
         reason: Reason for the result
         additional_fields: Additional fields to include
-        
+
     Returns:
         Consistent result dictionary
     """
@@ -234,8 +234,67 @@ def create_consistent_early_return(
         'reason': reason,
         'timestamp': datetime.now(timezone.utc).isoformat()
     }
-    
+
     if additional_fields:
         result.update(additional_fields)
-    
+
     return result
+
+
+class JSONSanitizer:
+    """Sanitizes data structures to ensure JSON serializability."""
+
+    @staticmethod
+    def sanitize(data: Any) -> Any:
+        """
+        Recursively convert numpy/pandas types to native Python types for JSON serialization.
+
+        This handles:
+        - numpy.bool_ -> bool
+        - numpy integers (int8, int16, int32, int64) -> int
+        - numpy floats (float16, float32, float64) -> float
+        - pandas.Timestamp -> ISO format string
+        - Recursively processes dictionaries and lists
+
+        Args:
+            data: Data structure to sanitize (can be dict, list, or scalar)
+
+        Returns:
+            Sanitized data with all numpy/pandas types converted to native Python types
+        """
+        import numpy as np
+
+        # Handle None
+        if data is None:
+            return None
+
+        # Handle numpy boolean
+        if isinstance(data, np.bool_):
+            return bool(data)
+
+        # Handle numpy integers
+        if isinstance(data, (np.integer, np.int8, np.int16, np.int32, np.int64)):
+            return int(data)
+
+        # Handle numpy floats
+        if isinstance(data, (np.floating, np.float16, np.float32, np.float64)):
+            return float(data)
+
+        # Handle pandas Timestamp
+        if isinstance(data, pd.Timestamp):
+            return data.isoformat()
+
+        # Handle datetime
+        if isinstance(data, datetime):
+            return data.isoformat()
+
+        # Handle dictionaries recursively
+        if isinstance(data, dict):
+            return {key: JSONSanitizer.sanitize(value) for key, value in data.items()}
+
+        # Handle lists and tuples recursively
+        if isinstance(data, (list, tuple)):
+            return [JSONSanitizer.sanitize(item) for item in data]
+
+        # Return as-is for native Python types (str, int, float, bool, etc.)
+        return data

@@ -9,6 +9,7 @@ from typing import Dict, List
 from datetime import datetime, timedelta, timezone
 
 from database import DatabaseManager, AlertRepository
+from detection.utils import JSONSanitizer
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +72,17 @@ class DatabaseAlertStorage:
                     timestamp = timestamp.replace(tzinfo=timezone.utc)
 
                 # Extract fields for database model
+                # Sanitize analysis data to convert numpy types to native Python types for JSON serialization
+                analysis_data = alert_record.get('analysis', {})
+                sanitized_analysis = JSONSanitizer.sanitize(analysis_data)
+
                 alert_data = {
                     'market_id': alert_record.get('market_id', ''),
                     'market_question': alert_record.get('market_question', 'Unknown Market'),
                     'alert_type': alert_type_str,
                     'severity': str(alert_record.get('severity', 'LOW')),
                     'timestamp': timestamp,
-                    'analysis_json': alert_record.get('analysis', {}),
+                    'analysis_json': sanitized_analysis,
                     'confidence_score': alert_record.get('confidence_score', 0.0),
                 }
 
