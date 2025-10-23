@@ -723,7 +723,9 @@ class MarketMonitor:
         
         # Volume detection - use historical baseline if available
         historical_baseline = self.market_baselines.get(market_id)
-        volume_analysis = self.volume_detector.analyze_volume_pattern(trades, market_id, historical_baseline)
+        volume_analysis = self.volume_detector.analyze_volume_pattern(
+            trades, market_id, historical_baseline, self.token_to_outcome
+        )
         
         # Log baseline source for monitoring
         if volume_analysis.get('baseline_source') == 'historical':
@@ -793,10 +795,19 @@ class MarketMonitor:
             key = trade.get('tx_hash') or trade.get('id') or f"{trade.get('timestamp')}_{trade.get('price')}_{trade.get('size')}"
             unique_trades[key] = trade
         
-        sorted_trades = sorted(unique_trades.values(), 
-                             key=lambda t: t.get('timestamp', ''), 
+        sorted_trades = sorted(unique_trades.values(),
+                             key=lambda t: t.get('timestamp', ''),
                              reverse=True)
-        
+
+        # Debug: Log sample trade structure to identify outcome field
+        if sorted_trades and len(sorted_trades) > 0:
+            sample = sorted_trades[0]
+            logger.debug(f"📋 Sample trade fields for {market_id[:10]}: {list(sample.keys())}")
+            # Log relevant fields that might contain outcome info
+            relevant_fields = {k: v for k, v in sample.items() if k in ['asset', 'asset_id', 'token_id', 'outcome', 'outcome_id', 'side', 'maker', 'taker']}
+            if relevant_fields:
+                logger.debug(f"📋 Relevant fields: {relevant_fields}")
+
         return sorted_trades[:VolumeConstants.MAX_HISTORICAL_TRADES]  # Return most recent trades
     
     async def _evaluate_multi_metric_alerts(self, market_id: str, market_data: Dict, 
@@ -893,6 +904,13 @@ class MarketMonitor:
             confidence += min(analysis.get('max_anomaly_score', 0) * 1.5, 8.0)
             if analysis.get('baseline_source') == BaselineType.HISTORICAL.value:
                 confidence += ConfidenceThresholds.HISTORICAL_BASELINE_BONUS
+            # Add bonus for strong directional bias (similar to whale activity)
+            outcome_imbalance = analysis.get('outcome_imbalance', 0)
+            side_imbalance = analysis.get('side_imbalance', 0)
+            # Use the stronger of the two imbalances
+            max_imbalance = max(outcome_imbalance, side_imbalance)
+            if max_imbalance > 0.7:
+                confidence += ConfidenceThresholds.DIRECTIONAL_BIAS_BONUS
         
         elif alert_type == AlertType.WHALE_ACTIVITY:
             # Base confidence on whale volume and coordination
@@ -1013,12 +1031,41 @@ class MarketMonitor:
         # Allow the alert - not platform-wide activity
         return False, f"Isolated activity (only {markets_with_similar_alerts} similar markets)"
     
-    async def _create_alert(self, market_id: str, market_data: Dict, alert_type, 
+    async def _create_alert(self, market_id: str, market_data: Dict, alert_type,
                           analysis: Dict, severity: str) -> Dict:
         """Create an alert from detection results"""
         # Convert AlertType enum to string if needed
         alert_type_str = alert_type.value if hasattr(alert_type, 'value') else str(alert_type)
-        
+
+        # Extract price with fallbacks
+        last_price = self._extract_market_price(market_data, market_id)
+
+        # Extract outcomePrices for YES/NO display
+        outcome_prices_raw = market_data.get('outcomePrices')
+        outcome_prices = None
+        if outcome_prices_raw:
+            try:
+                if isinstance(outcome_prices_raw, str):
+                    import json
+                    outcome_prices = json.loads(outcome_prices_raw)
+                elif isinstance(outcome_prices_raw, list):
+                    outcome_prices = outcome_prices_raw
+            except (ValueError, json.JSONDecodeError):
+                pass
+
+        # Extract slug - prefer event slug over market slug
+        slug = None
+        related_markets = []
+        events = market_data.get('events', [])
+        if events and len(events) > 0:
+            event_slug = events[0].get('slug')
+            slug = event_slug  # Use event slug (shorter, correct URL)
+
+            # Fetch related markets in the same group
+            related_markets = await self._get_related_markets(event_slug, market_id)
+        if not slug:
+            slug = market_data.get('slug')  # Fallback to market slug for older markets
+
         return {
             'market_id': market_id,
             'market_question': market_data.get('question', 'Unknown Market'),
@@ -1028,11 +1075,151 @@ class MarketMonitor:
             'analysis': analysis,
             'market_data': {
                 'volume24hr': market_data.get('volume24hr', 0),
-                'lastTradePrice': market_data.get('lastTradePrice', 0)
+                'lastTradePrice': last_price,
+                'outcomePrices': outcome_prices,  # Include full price array for YES/NO display
+                'slug': slug  # Include event slug for market URL generation
             },
+            'related_markets': related_markets,  # Include related outcomes for grouped markets
             'recommended_action': self._get_recommended_action(alert_type_str, severity, analysis)
         }
-    
+
+    def _extract_market_price(self, market_data: Dict, market_id: str = None) -> float:
+        """Extract current market price with multiple fallbacks
+
+        Args:
+            market_data: Market data from Gamma API
+            market_id: Market ID for trade history fallback
+
+        Returns:
+            Current price as float (0.0-1.0 range)
+        """
+        # Try outcomePrices (Gamma API field for YES/NO prices)
+        outcome_prices = market_data.get('outcomePrices')
+        if outcome_prices:
+            try:
+                # Handle both array and JSON string formats
+                if isinstance(outcome_prices, str):
+                    import json
+                    outcome_prices = json.loads(outcome_prices)
+
+                # Get YES price (first outcome)
+                if isinstance(outcome_prices, list) and len(outcome_prices) > 0:
+                    price = float(outcome_prices[0])
+                    if 0 <= price <= 1:
+                        return price
+            except (ValueError, TypeError, json.JSONDecodeError) as e:
+                logger.debug(f"Failed to parse outcomePrices: {e}")
+
+        # Fallback: Try to get from recent trades
+        if market_id and market_id in self.trade_history:
+            trades = self.trade_history[market_id]
+            if trades:
+                try:
+                    # Get most recent trade price
+                    last_trade = trades[-1]
+                    price = float(last_trade.get('price', 0))
+                    if 0 < price <= 1:
+                        return price
+                except (ValueError, TypeError, KeyError):
+                    pass
+
+        # Final fallback: return 0
+        return 0.0
+
+    async def _get_related_markets(self, event_slug: str, current_market_id: str) -> List[Dict]:
+        """
+        Find other markets in the same event group
+
+        Args:
+            event_slug: The event slug shared by grouped markets
+            current_market_id: ID of the current market to exclude
+
+        Returns:
+            List of dicts with 'question', 'yes_price', and 'no_price' for related markets
+        """
+        related = []
+
+        # First, check monitored markets (fast path)
+        for market_id, market_data in self.monitored_markets.items():
+            if market_id == current_market_id:
+                continue  # Skip the current market
+
+            # Check if this market shares the same event slug
+            events = market_data.get('events', [])
+            if events and len(events) > 0:
+                other_slug = events[0].get('slug')
+                if other_slug == event_slug:
+                    # Extract question and price
+                    question = market_data.get('question', '')
+                    outcome_prices = market_data.get('outcomePrices')
+
+                    if outcome_prices and isinstance(outcome_prices, list) and len(outcome_prices) >= 2:
+                        try:
+                            yes_price = float(outcome_prices[0])
+                            no_price = float(outcome_prices[1])
+                            related.append({
+                                'question': question,
+                                'yes_price': yes_price,
+                                'no_price': no_price
+                            })
+                        except (ValueError, TypeError):
+                            pass  # Skip if price parsing fails
+
+        # If we found related markets in monitored list, use them
+        if len(related) > 0:
+            related.sort(key=lambda x: x['yes_price'], reverse=True)
+            return related[:6]
+
+        # Otherwise, fetch from Gamma API (markets may not meet volume threshold)
+        try:
+            gamma_api = "https://gamma-api.polymarket.com"
+            async with aiohttp.ClientSession() as session:
+                # Query API for markets filtered by event slug
+                # Note: Gamma API doesn't have a direct event slug filter, so we fetch by limit and filter client-side
+                url = f"{gamma_api}/markets"
+                params = {
+                    'limit': 100,  # Fetch enough to find related markets
+                    '_lt': 'true'   # Include active markets
+                }
+
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+
+                        for market in data:
+                            # Skip current market
+                            if market.get('id') == current_market_id:
+                                continue
+
+                            # Check if this market has the same event slug
+                            events = market.get('events', [])
+                            if events and len(events) > 0:
+                                market_event_slug = events[0].get('slug')
+                                if market_event_slug == event_slug:
+                                    # Extract question and prices
+                                    question = market.get('question', '')
+                                    outcome_prices = market.get('outcomePrices')
+
+                                    if outcome_prices and isinstance(outcome_prices, list) and len(outcome_prices) >= 2:
+                                        try:
+                                            yes_price = float(outcome_prices[0])
+                                            no_price = float(outcome_prices[1])
+                                            related.append({
+                                                'question': question,
+                                                'yes_price': yes_price,
+                                                'no_price': no_price
+                                            })
+                                        except (ValueError, TypeError):
+                                            pass
+        except Exception as e:
+            logger.debug(f"Failed to fetch related markets from API for event '{event_slug}': {e}")
+
+        # Sort by probability descending (most likely outcomes first)
+        related.sort(key=lambda x: x['yes_price'], reverse=True)
+
+        # Return max 6 related outcomes
+        return related[:6]
+
     def _get_recommended_action(self, alert_type: str, severity: str, analysis: Dict) -> str:
         """Get recommended action based on alert type and severity"""
         if severity == 'CRITICAL':
@@ -1082,26 +1269,32 @@ class MarketMonitor:
 
             # Track whales based on alert type
             if alert_type_str == 'WHALE_ACTIVITY':
-                # Get whale trades from analysis
-                whale_trades = analysis.get('whale_trades', [])
+                # Get whale breakdown from analysis (dict with addresses as keys)
+                whale_breakdown = analysis.get('whale_breakdown', {})
 
-                for whale_trade in whale_trades:
-                    address = whale_trade.get('address')
-                    if not address:
+                if not whale_breakdown:
+                    logger.debug(f"No whale breakdown found in analysis for {market_id[:10]}...")
+                    return
+
+                for address, whale_data in whale_breakdown.items():
+                    # Skip invalid addresses
+                    if not address or address == 'unknown':
                         continue
 
                     trade_data = {
-                        'volume_usd': whale_trade.get('size', 0),
-                        'side': whale_trade.get('side', 'BUY'),
+                        'volume_usd': whale_data.get('total_volume', 0),
+                        'side': whale_data.get('dominant_side', 'BUY'),
                         'market_id': market_id,
                         'metrics': {
-                            'trade_price': whale_trade.get('price', 0),
-                            'trade_timestamp': whale_trade.get('timestamp')
+                            'trade_price': whale_data.get('avg_price', 0),
+                            'trade_count': whale_data.get('trade_count', 1),
+                            'avg_trade_size': whale_data.get('avg_trade_size', 0)
                         }
                     }
 
                     from common import WhaleRole
-                    role = WhaleRole.PRIMARY_ACTOR if len(whale_trades) == 1 else WhaleRole.PARTICIPANT
+                    # Primary actor if largest whale, otherwise participant
+                    role = WhaleRole.PRIMARY_ACTOR if whale_data.get('total_volume', 0) == analysis.get('largest_whale_volume', 0) else WhaleRole.PARTICIPANT
 
                     await self.whale_tracker.track_whale(
                         address=address,
@@ -1111,7 +1304,7 @@ class MarketMonitor:
                         whale_role=role
                     )
 
-                logger.debug(f"Tracked {len(whale_trades)} whale addresses from alert")
+                logger.debug(f"Tracked {len(whale_breakdown)} whale addresses from alert")
 
             elif alert_type_str == 'COORDINATED_TRADING':
                 # Get coordinated wallets from analysis
@@ -1182,9 +1375,11 @@ class MarketMonitor:
                 # For coordination, use the side with more activity
                 predicted_direction = analysis.get('dominant_side', 'BUY')
             elif alert_type_str == 'VOLUME_SPIKE':
-                # For volume spikes, infer direction from recent momentum
-                # For now, default to BUY (can be enhanced later)
-                predicted_direction = 'BUY'
+                # For volume spikes, use the dominant outcome (YES/NO)
+                predicted_direction = analysis.get('dominant_outcome', 'YES')
+                # If outcome is unknown, fallback to dominant side (BUY/SELL)
+                if predicted_direction == 'UNKNOWN':
+                    predicted_direction = analysis.get('dominant_side', 'BUY')
 
             # Create outcome record
             await self.outcome_tracker.create_outcome_record(

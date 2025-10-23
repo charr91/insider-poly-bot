@@ -111,15 +111,33 @@ class TradeNormalizer:
         """
         return trade.get('maker', trade.get('trader', trade.get('user', 'unknown')))
     
+    @staticmethod
+    def normalize_tx_hash(trade: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract and normalize transaction hash from trade data.
+
+        Args:
+            trade: Trade dictionary with various possible tx hash field names
+
+        Returns:
+            Normalized transaction hash or None if not available
+        """
+        # Try multiple field names that could contain the transaction hash
+        tx_hash = trade.get('id', trade.get('tx_hash', trade.get('transactionHash', trade.get('txHash'))))
+
+        if tx_hash and isinstance(tx_hash, str) and tx_hash != 'unknown':
+            return tx_hash
+        return None
+
     @classmethod
     def normalize_trade(cls, trade: Dict[str, Any], require_timestamp: bool = True) -> Optional[Dict[str, Any]]:
         """
         Normalize a complete trade object with all fields.
-        
+
         Args:
             trade: Raw trade dictionary
             require_timestamp: Whether timestamp is required for validity
-            
+
         Returns:
             Normalized trade dictionary, or None if invalid
         """
@@ -129,14 +147,14 @@ class TradeNormalizer:
             )
             price = cls.normalize_price(trade)
             size = cls.normalize_size(trade)
-            
+
             # Validate required fields
             if price <= 0:
                 return None
-            
+
             if require_timestamp and timestamp is None:
                 return None
-            
+
             result = {
                 'price': price,
                 'size': size,
@@ -144,11 +162,26 @@ class TradeNormalizer:
                 'side': cls.normalize_side(trade),
                 'maker': cls.normalize_maker(trade)
             }
-            
+
             # Only add timestamp if available
             if timestamp is not None:
                 result['timestamp'] = timestamp
-            
+
+            # Add transaction hash if available
+            tx_hash = cls.normalize_tx_hash(trade)
+            if tx_hash:
+                result['tx_hash'] = tx_hash
+
+            # Add asset_id if available (for outcome tracking)
+            # Check multiple possible field names from different APIs
+            asset_id = (trade.get('asset_id') or
+                       trade.get('asset') or
+                       trade.get('token_id') or
+                       trade.get('outcome') or
+                       trade.get('outcome_id'))
+            if asset_id is not None:
+                result['asset_id'] = asset_id
+
             return result
         except Exception as e:
             logger.debug(f"Failed to normalize trade: {e}")

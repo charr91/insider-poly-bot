@@ -153,15 +153,26 @@ class TestDiscordIntegration:
 
         # Verify the Discord webhook was called with proper payload
         mock_post.assert_called()
-        call_kwargs = mock_post.call_args[1]  # Get keyword arguments
+
+        # Find the Discord call (has 'embeds' in json payload)
+        # Since we fixed Telegram, both Discord AND Telegram calls are made
+        # We need to find the Discord-specific call
+        discord_call = None
+        for call in mock_post.call_args_list:
+            call_kwargs = call[1]  # Get keyword arguments
+            if 'json' in call_kwargs and 'embeds' in call_kwargs['json']:
+                discord_call = call_kwargs
+                break
+
+        assert discord_call is not None, "Discord call with embeds not found in HTTP calls"
+        call_kwargs = discord_call
 
         # Discord calls should have 'json' parameter with 'embeds'
-        if 'json' in call_kwargs:
-            assert 'embeds' in call_kwargs['json'], "Discord payload should have embeds"
-            assert len(call_kwargs['json']['embeds']) > 0
+        assert 'embeds' in call_kwargs['json'], "Discord payload should have embeds"
+        assert len(call_kwargs['json']['embeds']) > 0
 
-            # Verify embed structure
-            embed = call_kwargs['json']['embeds'][0]
-            assert 'title' in embed
-            assert 'HIGH' in embed['title']
-            assert 'color' in embed
+        # Verify embed structure
+        embed = call_kwargs['json']['embeds'][0]
+        assert 'title' in embed
+        assert 'HIGH' in embed['title']
+        assert 'color' in embed

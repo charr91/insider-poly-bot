@@ -190,11 +190,11 @@ class DetectionResult:
 class ConfidenceThresholds:
     """Confidence score thresholds for different scenarios"""
     # Single metric thresholds (require very high confidence)
-    SINGLE_ANOMALY_THRESHOLD = 8.0
-    
+    SINGLE_ANOMALY_THRESHOLD = 8.5
+
     # Multi-metric thresholds (lower individual requirements)
-    MULTI_ANOMALY_THRESHOLD = 10.0
-    CRITICAL_THRESHOLD = 15.0
+    MULTI_ANOMALY_THRESHOLD = 12.0
+    CRITICAL_THRESHOLD = 18.0
     
     # Cross-market filtering thresholds
     MIN_SIMILAR_MARKETS = 3

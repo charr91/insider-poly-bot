@@ -175,9 +175,11 @@ Controls notification settings and alert behavior across Discord and Telegram.
 
 **New Features:**
 - **Actionable Recommendations**: Alerts now include specific trading recommendations (e.g., "Consider YES Buy @ $0.65") based on signal strength and confidence
+- **Confidence Scoring**: Multi-metric confidence system (0-100 scale) combines multiple detection signals. Higher scores indicate stronger conviction. Single anomalies require very high confidence (≥10), while multiple anomalies are weighted together.
+- **Whale Address Tracking**: Wallet addresses from whale activity and coordination alerts are automatically stored in the database for pattern analysis and historical tracking
 - **Market Links**: Direct links to Polymarket event pages
-- **Transaction Details**: Polygonscan links to relevant transactions and wallet addresses
-- **Enhanced Formatting**: Clean, professional alert layout following best practices
+- **Transaction Details**: Polygonscan links to relevant transactions and wallet addresses when available
+- **Enhanced Formatting**: Clean, professional alert layout following best practices with properly formatted signal types
 - **Multi-Platform**: Send to Discord, Telegram, or both simultaneously
 
 #### Testing Alert Connections

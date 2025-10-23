@@ -236,18 +236,175 @@ class VolumeDetector(DetectorBase):
         """Check if volume exceeds percentile-based thresholds"""
         try:
             percentiles = baseline.get('percentile_thresholds', {})
-            
+
             # Use P95 as anomaly threshold (top 5% of historical activity)
             p95_threshold = percentiles.get('p95')
             if p95_threshold and current_volume > p95_threshold:
                 return True
-            
+
             return False
-            
+
         except Exception as e:
             logger.warning(f"Error checking percentile thresholds: {e}")
             return False
-    
+
+    def _analyze_volume_direction(self, trades: List[Dict], window_hours: int, token_to_outcome: Dict = None) -> Dict:
+        """
+        Analyze volume direction (YES/NO outcome and BUY/SELL side)
+
+        Args:
+            trades: List of trade data
+            window_hours: Time window to analyze
+            token_to_outcome: Dict mapping token IDs to "Yes"/"No" (from market data)
+
+        Returns:
+            Dict with directional analysis including:
+            - dominant_outcome: YES or NO
+            - dominant_side: BUY or SELL
+            - outcome_imbalance: Ratio of YES vs NO volume
+            - side_imbalance: Ratio of BUY vs SELL volume
+            - yes_volume, no_volume, buy_volume, sell_volume
+        """
+        if not trades:
+            return {
+                'dominant_outcome': 'UNKNOWN',
+                'dominant_side': 'UNKNOWN',
+                'outcome_imbalance': 0,
+                'side_imbalance': 0,
+                'yes_volume': 0,
+                'no_volume': 0,
+                'buy_volume': 0,
+                'sell_volume': 0
+            }
+
+        # Normalize trades first
+        normalized_trades = TradeNormalizer.normalize_trades(trades)
+        if not normalized_trades:
+            return {
+                'dominant_outcome': 'UNKNOWN',
+                'dominant_side': 'UNKNOWN',
+                'outcome_imbalance': 0,
+                'side_imbalance': 0,
+                'yes_volume': 0,
+                'no_volume': 0,
+                'buy_volume': 0,
+                'sell_volume': 0
+            }
+
+        # Find recent trades within window
+        latest_timestamp = max(trade['timestamp'].to_pydatetime() for trade in normalized_trades)
+        reference_time = latest_timestamp if latest_timestamp else datetime.now(timezone.utc)
+        cutoff_time = reference_time - timedelta(hours=window_hours)
+
+        recent_trades = [
+            trade for trade in normalized_trades
+            if trade['timestamp'].to_pydatetime() > cutoff_time
+        ]
+
+        if not recent_trades:
+            return {
+                'dominant_outcome': 'UNKNOWN',
+                'dominant_side': 'UNKNOWN',
+                'outcome_imbalance': 0,
+                'side_imbalance': 0,
+                'yes_volume': 0,
+                'no_volume': 0,
+                'buy_volume': 0,
+                'sell_volume': 0
+            }
+
+        # Analyze by outcome (YES/NO) - using asset_id if available
+        yes_volume = 0
+        no_volume = 0
+        buy_volume = 0
+        sell_volume = 0
+        trades_with_outcome = 0
+        trades_without_outcome = 0
+
+        for trade in recent_trades:
+            volume = trade.get('volume_usd', 0)
+            side = trade.get('side', 'BUY')
+
+            # Track BUY vs SELL
+            if side == 'BUY':
+                buy_volume += volume
+            else:
+                sell_volume += volume
+
+            # Track YES vs NO outcome
+            # Use token_to_outcome mapping if available (maps hex token addresses to "Yes"/"No")
+            # Fallback to checking for '0'/'1' or 'yes'/'no' strings
+            asset_id = trade.get('asset_id')
+            if asset_id is not None:
+                # Try token mapping first (most reliable)
+                if token_to_outcome and asset_id in token_to_outcome:
+                    outcome = token_to_outcome[asset_id]
+                    if outcome == "Yes":
+                        yes_volume += volume
+                        trades_with_outcome += 1
+                    elif outcome == "No":
+                        no_volume += volume
+                        trades_with_outcome += 1
+                    else:
+                        # Unexpected value in mapping
+                        yes_volume += volume / 2
+                        no_volume += volume / 2
+                        trades_without_outcome += 1
+                else:
+                    # Fallback: check for simple integer or string formats
+                    asset_str = str(asset_id).lower()
+                    if 'yes' in asset_str or str(asset_id) == '0':
+                        yes_volume += volume
+                        trades_with_outcome += 1
+                    elif 'no' in asset_str or str(asset_id) == '1':
+                        no_volume += volume
+                        trades_with_outcome += 1
+                    else:
+                        # Unknown format - log for debugging and split evenly
+                        if len(recent_trades) <= 5:  # Only log for small sample to avoid spam
+                            logger.debug(f"Unknown asset_id format: {asset_id} (no token mapping)")
+                        yes_volume += volume / 2
+                        no_volume += volume / 2
+                        trades_without_outcome += 1
+            else:
+                # No asset_id available, split evenly
+                yes_volume += volume / 2
+                no_volume += volume / 2
+                trades_without_outcome += 1
+
+        # Log outcome detection stats
+        if trades_without_outcome > 0:
+            logger.debug(f"Outcome detection: {trades_with_outcome} with outcome, {trades_without_outcome} without")
+
+        # Calculate imbalances
+        total_outcome_volume = yes_volume + no_volume
+        total_side_volume = buy_volume + sell_volume
+
+        if total_outcome_volume > 0:
+            outcome_imbalance = abs(yes_volume - no_volume) / total_outcome_volume
+            dominant_outcome = 'YES' if yes_volume > no_volume else 'NO'
+        else:
+            outcome_imbalance = 0
+            dominant_outcome = 'UNKNOWN'
+
+        if total_side_volume > 0:
+            side_imbalance = abs(buy_volume - sell_volume) / total_side_volume
+            dominant_side = 'BUY' if buy_volume > sell_volume else 'SELL'
+        else:
+            side_imbalance = 0
+            dominant_side = 'UNKNOWN'
+
+        return {
+            'dominant_outcome': dominant_outcome,
+            'dominant_side': dominant_side,
+            'outcome_imbalance': outcome_imbalance,
+            'side_imbalance': side_imbalance,
+            'yes_volume': yes_volume,
+            'no_volume': no_volume,
+            'buy_volume': buy_volume,
+            'sell_volume': sell_volume
+        }
+
     def get_recent_volume(self, trades: List[Dict], window_hours: int = 1) -> float:
         """Calculate volume in recent time window"""
         if not trades:
@@ -273,7 +430,7 @@ class VolumeDetector(DetectorBase):
         
         return total_volume
     
-    def analyze_volume_pattern(self, trades: List[Dict], market_id: str = None, historical_baseline: Dict = None) -> Dict:
+    def analyze_volume_pattern(self, trades: List[Dict], market_id: str = None, historical_baseline: Dict = None, token_to_outcome: Dict = None) -> Dict:
         """Analyze volume patterns over different time windows"""
         if not trades:
             return create_consistent_early_return(
@@ -298,29 +455,36 @@ class VolumeDetector(DetectorBase):
         # Check different time windows
         windows = [1, 2, 4, 6]  # hours
         results = {}
-        
+
         max_anomaly_score = 0
         anomaly_detected = False
-        
+        best_window = None
+
         for window in windows:
             current_volume = self.get_recent_volume(trades, window)
             is_anomaly, spike_multiplier, details = self.detect_volume_spike(
                 current_volume, baseline
             )
-            
+
             if is_anomaly:
                 anomaly_detected = True
                 anomaly_score = max(details['z_score'], spike_multiplier)
                 if anomaly_score > max_anomaly_score:
                     max_anomaly_score = anomaly_score
-            
+                    best_window = window
+
             results[f'{window}h_window'] = {
                 'volume': current_volume,
                 'anomaly': is_anomaly,
                 'spike_multiplier': spike_multiplier,
                 'details': details
             }
-        
+
+        # Analyze direction for the window with highest anomaly
+        direction_analysis = {}
+        if best_window:
+            direction_analysis = self._analyze_volume_direction(trades, best_window, token_to_outcome)
+
         return {
             'anomaly': anomaly_detected,
             'max_anomaly_score': max_anomaly_score,
@@ -328,5 +492,9 @@ class VolumeDetector(DetectorBase):
             'baseline_source': baseline_source,
             'market_id': market_id,
             'windows': results,
+            'dominant_outcome': direction_analysis.get('dominant_outcome', 'UNKNOWN'),
+            'dominant_side': direction_analysis.get('dominant_side', 'UNKNOWN'),
+            'outcome_imbalance': direction_analysis.get('outcome_imbalance', 0),
+            'side_imbalance': direction_analysis.get('side_imbalance', 0),
             'timestamp': datetime.now(timezone.utc).isoformat()
         }

@@ -367,9 +367,104 @@ class TestVolumeDetector:
     def test_resample_fallback(self, mock_resample, detector, sample_trades):
         """Test fallback calculation when resample fails."""
         mock_resample.side_effect = Exception("Resample failed")
-        
+
         baseline = detector.calculate_baseline_metrics(sample_trades)
-        
+
         # Should use fallback calculation
         assert 'avg_hourly_volume' in baseline
         assert baseline['avg_hourly_volume'] > 0
+
+    def test_directional_analysis_fields(self, detector, spike_trades):
+        """Test that volume spike analysis includes directional fields."""
+        result = detector.analyze_volume_pattern(spike_trades)
+
+        # Should have directional fields
+        assert 'dominant_outcome' in result
+        assert 'dominant_side' in result
+        assert 'outcome_imbalance' in result
+        assert 'side_imbalance' in result
+
+        # Fields should have valid values
+        assert result['dominant_outcome'] in ['YES', 'NO', 'UNKNOWN']
+        assert result['dominant_side'] in ['BUY', 'SELL', 'UNKNOWN']
+        assert 0 <= result['outcome_imbalance'] <= 1
+        assert 0 <= result['side_imbalance'] <= 1
+
+    def test_directional_analysis_with_asset_id(self, detector):
+        """Test directional analysis with asset_id field."""
+        trades_with_asset = [
+            {
+                'price': '100',
+                'size': '10',
+                'side': 'BUY',
+                'asset_id': '0',  # YES outcome
+                'timestamp': int(datetime.now().timestamp())
+            },
+            {
+                'price': '100',
+                'size': '5',
+                'side': 'BUY',
+                'asset_id': '1',  # NO outcome
+                'timestamp': int(datetime.now().timestamp())
+            },
+            {
+                'price': '100',
+                'size': '2',
+                'side': 'SELL',
+                'asset_id': '0',  # YES outcome
+                'timestamp': int(datetime.now().timestamp())
+            }
+        ]
+
+        direction = detector._analyze_volume_direction(trades_with_asset, 1)
+
+        # Should detect YES as dominant outcome (10 BUY + 2 SELL = 12 YES vs 5 NO)
+        assert direction['dominant_outcome'] == 'YES'
+        # Should detect BUY as dominant side (15 BUY vs 2 SELL)
+        assert direction['dominant_side'] == 'BUY'
+        assert direction['outcome_imbalance'] > 0
+        assert direction['side_imbalance'] > 0
+
+    def test_directional_analysis_with_token_mapping(self, detector):
+        """Test directional analysis with token_to_outcome mapping (hex addresses)."""
+        # Simulate real Polymarket token addresses
+        yes_token = '0x4d97dcd97ec945f40cf65f87097ace5ea0476045'
+        no_token = '0xb1bd5762ffa5e60000000000000000000000000'
+
+        token_to_outcome = {
+            yes_token: 'Yes',
+            no_token: 'No'
+        }
+
+        trades_with_tokens = [
+            {
+                'price': '100',
+                'size': '20',
+                'side': 'SELL',
+                'asset_id': yes_token,  # Selling YES
+                'timestamp': int(datetime.now().timestamp())
+            },
+            {
+                'price': '100',
+                'size': '3',
+                'side': 'BUY',
+                'asset_id': no_token,  # Buying NO
+                'timestamp': int(datetime.now().timestamp())
+            },
+            {
+                'price': '100',
+                'size': '2',
+                'side': 'BUY',
+                'asset_id': yes_token,  # Buying YES
+                'timestamp': int(datetime.now().timestamp())
+            }
+        ]
+
+        direction = detector._analyze_volume_direction(trades_with_tokens, 1, token_to_outcome)
+
+        # Should detect YES as dominant outcome (20 + 2 = 22 YES vs 3 NO)
+        assert direction['dominant_outcome'] == 'YES'
+        # Should detect SELL as dominant side (20 SELL vs 5 BUY)
+        assert direction['dominant_side'] == 'SELL'
+        assert direction['outcome_imbalance'] > 0.5  # Strong YES bias
+        assert direction['side_imbalance'] > 0.5  # Strong SELL bias

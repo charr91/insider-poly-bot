@@ -101,14 +101,21 @@ class WhaleDetector(DetectorBase):
         if 'asset_id' in whale_trades.columns:
             agg_dict['asset_id'] = lambda x: x.mode().iloc[0] if len(x) > 0 else (x.iloc[0] if len(x) > 0 else None)
 
+        # Add tx_hash aggregation if it exists (take first non-null)
+        if 'tx_hash' in whale_trades.columns:
+            agg_dict['tx_hash'] = lambda x: x.dropna().iloc[0] if len(x.dropna()) > 0 else None
+
         # Group by wallet address
         whale_breakdown = whale_trades.groupby('maker').agg(agg_dict).round(2)
 
-        # Flatten column names
+        # Flatten column names - build dynamically based on what's included
+        column_names = ['total_volume', 'trade_count', 'avg_trade_size', 'dominant_side', 'avg_price']
         if 'asset_id' in whale_trades.columns:
-            whale_breakdown.columns = ['total_volume', 'trade_count', 'avg_trade_size', 'dominant_side', 'avg_price', 'asset_id']
-        else:
-            whale_breakdown.columns = ['total_volume', 'trade_count', 'avg_trade_size', 'dominant_side', 'avg_price']
+            column_names.append('asset_id')
+        if 'tx_hash' in whale_trades.columns:
+            column_names.append('tx_hash')
+
+        whale_breakdown.columns = column_names
         
         # Sort by total volume
         top_whales = whale_breakdown.nlargest(10, 'total_volume')

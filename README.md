@@ -22,6 +22,7 @@ A sophisticated bot that monitors Polymarket trading activity to identify potent
 - **⚡ Advanced Pattern Recognition**: Statistical analysis using Z-scores, volatility measurements, and momentum indicators
 - **🔔 Smart Alerting**: Actionable trading recommendations with Discord & Telegram support
 - **🎯 Intelligent Recommendations**: Context-aware buy/sell/monitor recommendations based on signal strength and confidence
+- **🐋 Whale Address Tracking**: Automatic database storage of whale wallet addresses from alerts for analysis
 - **🔗 Market Integration**: Direct links to Polymarket events and Polygonscan transactions in alerts
 - **🌐 Modular Architecture**: Separate data sources, detection algorithms, and alert systems
 - **📈 Comprehensive Analytics**: Detailed logging and activity reporting

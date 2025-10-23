@@ -6,6 +6,8 @@ Formats alerts as Discord embeds following the improved structure
 from typing import Dict, Optional
 from datetime import datetime
 from common import AlertSeverity
+from alerts.recommendation_engine import format_confidence_display
+from alerts.formatters.format_utils import format_market_price, format_volume, extract_outcome_name, _format_single_price
 import logging
 
 logger = logging.getLogger(__name__)
@@ -65,7 +67,23 @@ class DiscordFormatter:
             "fields": []
         }
 
-        # Add recommendation section
+        # Add market info section (position 1)
+        market_info = self._format_market_info(alert, market_question, market_url)
+        embed["fields"].append({
+            "name": "🎯 MARKET",
+            "value": market_info,
+            "inline": False
+        })
+
+        # Add detected section (position 2)
+        detected_info = self._format_detected_info(alert_type_str, analysis, alert)
+        embed["fields"].append({
+            "name": "📊 DETECTED",
+            "value": detected_info,
+            "inline": False
+        })
+
+        # Add recommendation section (position 3)
         if recommendation:
             rec_emoji = self._get_recommendation_emoji(recommendation['action'])
             rec_text = f"{rec_emoji} **{recommendation['text']}**\n_{recommendation['reasoning']}_"
@@ -75,23 +93,7 @@ class DiscordFormatter:
                 "inline": False
             })
 
-        # Add market info section
-        market_info = self._format_market_info(alert, market_question, market_url)
-        embed["fields"].append({
-            "name": "🎯 MARKET",
-            "value": market_info,
-            "inline": False
-        })
-
-        # Add detected section
-        detected_info = self._format_detected_info(alert_type_str, analysis, alert)
-        embed["fields"].append({
-            "name": "📊 DETECTED",
-            "value": detected_info,
-            "inline": False
-        })
-
-        # Add trade details if available (for whale/coordination alerts)
+        # Add trade details if available (position 4 - for whale/coordination alerts)
         if alert_type_str in ['WHALE_ACTIVITY', 'COORDINATED_TRADING']:
             trade_details = self._format_trade_details(analysis)
             if trade_details:
@@ -101,10 +103,21 @@ class DiscordFormatter:
                     "inline": False
                 })
 
-        # Add confidence score footer (cap at 100)
-        confidence_pct = min(int((confidence_score / 10) * 100), 100)
+        # Add related outcomes for grouped markets (position 5)
+        related_markets = alert.get('related_markets', [])
+        if related_markets and len(related_markets) > 0:
+            related_outcomes_text = self._format_related_outcomes(related_markets)
+            embed["fields"].append({
+                "name": "📊 OTHER OUTCOMES",
+                "value": related_outcomes_text,
+                "inline": False
+            })
+
+        # Add confidence score footer with label (hybrid format)
+        is_multi_metric = alert.get('multi_metric', False)
+        confidence_label, confidence_pct = format_confidence_display(confidence_score, is_multi_metric)
         embed["footer"] = {
-            "text": f"📈 Confidence: {confidence_pct}/100"
+            "text": f"📈 {confidence_label} Confidence ({confidence_pct}/100)"
         }
 
         return embed
@@ -121,15 +134,15 @@ class DiscordFormatter:
     def _format_market_info(self, alert: Dict, market_question: str, market_url: Optional[str]) -> str:
         """Format market information section"""
         market_data = alert.get('market_data', {})
-        volume_24hr = market_data.get('volume24hr', 0)
-        last_price = market_data.get('lastTradePrice', 0)
 
-        # Format prices if available
-        # For binary markets, we show YES/NO prices
+        # Use shared formatting utilities
+        price_str = format_market_price(market_data)
+        volume_str = format_volume(market_data.get('volume24hr', 0))
+
         lines = [
             f"**{market_question}**",
-            f"Current: {last_price:.2f}¢ YES",  # Simplified - in reality we'd show both YES/NO
-            f"Volume: ${volume_24hr/1000:.1f}K" if volume_24hr >= 1000 else f"Volume: ${volume_24hr:.0f}"
+            f"Current: {price_str}",
+            f"Volume: {volume_str}"
         ]
 
         # Add market link if available
@@ -148,6 +161,28 @@ class DiscordFormatter:
         if alert_type_str == 'VOLUME_SPIKE':
             anomaly_score = analysis.get('max_anomaly_score', 0)
             lines.append(f"**Score:** {anomaly_score:.1f}x normal")
+
+            # Add directional information if available
+            dominant_outcome = analysis.get('dominant_outcome', 'UNKNOWN')
+            dominant_side = analysis.get('dominant_side', 'UNKNOWN')
+            outcome_imbalance = analysis.get('outcome_imbalance', 0)
+            side_imbalance = analysis.get('side_imbalance', 0)
+
+            # Show outcome and pressure information
+            # If we can determine outcome, show it; otherwise show pressure with note
+            if dominant_outcome != 'UNKNOWN' and outcome_imbalance >= 0.10:
+                # We have outcome data and clear direction
+                lines.append(f"**Outcome:** {outcome_imbalance*100:.0f}% {dominant_outcome}")
+                # Also show pressure if meaningful
+                if dominant_side != 'UNKNOWN' and side_imbalance >= 0.10:
+                    lines.append(f"**Pressure:** {side_imbalance*100:.0f}% {dominant_side}")
+            else:
+                # No outcome data - show pressure with clarification
+                if dominant_side != 'UNKNOWN':
+                    if side_imbalance < 0.10:
+                        lines.append(f"**Volume:** Balanced pressure (outcome unknown)")
+                    else:
+                        lines.append(f"**Volume:** {side_imbalance*100:.0f}% {dominant_side} pressure (outcome unknown)")
 
         elif alert_type_str == 'WHALE_ACTIVITY':
             total_volume = analysis.get('total_whale_volume', 0)
@@ -229,5 +264,20 @@ class DiscordFormatter:
             tx_short = f"{top_whale['tx_hash'][:6]}...{top_whale['tx_hash'][-4:]}"
             tx_url = f"https://polygonscan.com/tx/{top_whale['tx_hash']}"
             lines.append(f"**Tx:** [{tx_short}]({tx_url})")
+
+        return "\n".join(lines)
+
+    def _format_related_outcomes(self, related_markets: list) -> str:
+        """Format related outcomes for grouped markets"""
+        lines = []
+
+        for rm in related_markets:
+            # Extract short outcome name
+            outcome = extract_outcome_name(rm['question'])
+            # Format both YES and NO prices
+            yes_str = _format_single_price(rm['yes_price'])
+            no_str = _format_single_price(rm['no_price'])
+            # Add bullet point with both prices
+            lines.append(f"• {outcome}: {yes_str} YES / {no_str} NO")
 
         return "\n".join(lines)

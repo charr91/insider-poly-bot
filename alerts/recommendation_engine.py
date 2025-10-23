@@ -26,6 +26,40 @@ class ConfidenceLevel(Enum):
     LOW = "LOW"
 
 
+def format_confidence_display(confidence_score: float, is_multi_metric: bool = False) -> tuple:
+    """
+    Format confidence score for display with label and percentage
+
+    Args:
+        confidence_score: Raw confidence score (0-10+ scale)
+        is_multi_metric: Whether this is a multi-metric alert (can have scores >10)
+
+    Returns:
+        Tuple of (label, percentage) e.g. ("Very High", 95)
+    """
+    # Scale multi-metric scores to 0-10 range
+    if is_multi_metric and confidence_score > 10.0:
+        # Scale: 15.0 → 10.0 (100%), 12.0 → 8.0 (80%), 18.0 → 10.0+ (100%)
+        scaled_score = min(confidence_score / 1.5, 10.0)
+    else:
+        scaled_score = confidence_score
+
+    # Convert to percentage (0-100)
+    percentage = min(int((scaled_score / 10.0) * 100), 100)
+
+    # Determine label based on scaled score
+    if scaled_score >= 9.5 or (is_multi_metric and confidence_score >= 15.0):
+        label = "Very High"
+    elif scaled_score >= 8.5 or (is_multi_metric and confidence_score >= 12.0):
+        label = "High"
+    elif scaled_score >= 8.0 or (is_multi_metric and confidence_score >= 10.0):
+        label = "Medium"
+    else:
+        label = "Low"
+
+    return (label, percentage)
+
+
 class RecommendationEngine:
     """Generates intelligent trading recommendations from alert analysis"""
 
@@ -101,9 +135,10 @@ class RecommendationEngine:
                 severity, analysis, current_price, confidence_level
             )
         else:
-            # Fallback for unknown alert types
+            # Fallback for unknown alert types - format enum properly
+            alert_type_formatted = (alert_type.value if hasattr(alert_type, 'value') else str(alert_type)).replace('_', ' ').title()
             return self._generate_monitor_recommendation(
-                f"Unusual {alert_type.value if hasattr(alert_type, 'value') else alert_type} detected",
+                f"Unusual {alert_type_formatted} detected",
                 "Verify independently before acting",
                 current_price, confidence_level
             )
@@ -133,14 +168,15 @@ class RecommendationEngine:
             direction_imbalance > 0.8 and
             total_volume > 50000):
 
-            action = RecommendationAction.BUY if dominant_side == 'BUY' else RecommendationAction.SELL
+            # In prediction markets, always BUY the outcome we think will happen
+            action = RecommendationAction.BUY
 
             # Calculate price levels
-            entry_price = current_price * 1.02 if action == RecommendationAction.BUY else current_price * 0.98
-            risk_price = current_price * 0.95 if action == RecommendationAction.BUY else current_price * 1.05
+            entry_price = current_price * 1.02
+            risk_price = current_price * 0.95
 
             # Create recommendation text
-            action_text = "Buy" if action == RecommendationAction.BUY else "Sell"
+            action_text = "Buy"
             whale_desc = f"{whale_count} whale{'s' if whale_count != 1 else ''}"
             coord_text = " coordinated" if coordinated else ""
 
@@ -268,91 +304,150 @@ class RecommendationEngine:
         supporting_anomalies: list
     ) -> Dict:
         """Generate recommendation for multi-metric alerts (highest confidence)"""
+        # Helper function to format alert type enums
+        def format_alert_type(alert_type):
+            """Format alert type enum to human-readable string"""
+            type_str = alert_type.value if hasattr(alert_type, 'value') else str(alert_type)
+            return type_str.replace('_', ' ').title()
+
+        # Determine if this is a whale/coordination alert (show BUY action) or volume/price alert (show signal)
+        is_actionable_alert = primary_alert_type in [AlertType.WHALE_ACTIVITY, AlertType.COORDINATED_TRADING]
+
         # Extract information from primary alert
         outcome = "YES"  # Default, will be overridden
         action = RecommendationAction.MONITOR
 
-        # Determine outcome and action from primary alert type
-        if primary_alert_type == AlertType.WHALE_ACTIVITY:
-            outcome = self._determine_outcome_from_whales(analysis)
-            # Whale detector returns 'dominant_side', not 'dominant_direction'
-            dominant_side = analysis.get('dominant_side', 'BUY')
-            action = RecommendationAction.BUY if dominant_side == 'BUY' else RecommendationAction.SELL
-        elif primary_alert_type == AlertType.COORDINATED_TRADING:
-            outcome = self._determine_outcome_from_coordination(analysis)
-            # Coordination detector returns 'dominant_direction'
-            dominant_direction = analysis.get('dominant_direction', 'BUY')
-            action = RecommendationAction.BUY if dominant_direction == 'BUY' else RecommendationAction.SELL
+        if is_actionable_alert:
+            # Whale/Coordination alerts: determine outcome and use BUY action
+            if primary_alert_type == AlertType.WHALE_ACTIVITY:
+                outcome = self._determine_outcome_from_whales(analysis)
+            elif primary_alert_type == AlertType.COORDINATED_TRADING:
+                outcome = self._determine_outcome_from_coordination(analysis)
+            action = RecommendationAction.BUY
+        else:
+            # Volume/Price alerts: determine price direction for signal strength
+            # Try to determine outcome from whale activity in supporting anomalies
+            for anomaly in supporting_anomalies:
+                if anomaly.get('type') == AlertType.WHALE_ACTIVITY:
+                    anomaly_analysis = anomaly.get('analysis', {})
+                    outcome = self._determine_outcome_from_whales(anomaly_analysis)
+                    break
+                elif anomaly.get('type') == AlertType.COORDINATED_TRADING:
+                    anomaly_analysis = anomaly.get('analysis', {})
+                    outcome = self._determine_outcome_from_coordination(anomaly_analysis)
+                    break
 
-        # Very high confidence (3+ signals)
-        if confidence_score >= 15 and len(supporting_anomalies) >= 2:
-            action_text = "Buy" if action == RecommendationAction.BUY else "Sell"
+        # Determine price direction for volume/price alerts
+        price_direction = None
+        if not is_actionable_alert:
+            # Convert supporting_anomalies to full format for helper
+            full_anomalies = []
+            for anomaly in supporting_anomalies:
+                if anomaly.get('type') == AlertType.UNUSUAL_PRICE_MOVEMENT:
+                    # Get the full analysis from the anomaly
+                    full_anomalies.append(anomaly)
+            price_direction = self._determine_price_direction(analysis, full_anomalies)
 
-            # Calculate price levels
-            entry_price = current_price * 1.02 if action == RecommendationAction.BUY else current_price * 0.98
-            target_price = current_price * 1.30 if action == RecommendationAction.BUY else current_price * 0.70
-            risk_price = current_price * 0.90 if action == RecommendationAction.BUY else current_price * 1.10
+        # Very high confidence (3+ signals) - threshold now 18.0
+        if confidence_score >= 18 and len(supporting_anomalies) >= 2:
+            if is_actionable_alert:
+                # Whale/Coordination: Show BUY recommendation
+                entry_price = current_price * 1.02
+                target_price = current_price * 1.30
+                risk_price = current_price * 0.90
 
-            # Build supporting signals text - format enum values properly
-            def format_alert_type(alert_type):
-                """Format alert type enum to human-readable string"""
-                type_str = alert_type.value if hasattr(alert_type, 'value') else str(alert_type)
-                return type_str.replace('_', ' ').title()
+                support_text = " + ".join([format_alert_type(a['type']) for a in supporting_anomalies[:2]])
 
-            support_text = " + ".join([format_alert_type(a['type']) for a in supporting_anomalies[:2]])
+                text = (
+                    f"Consider {outcome} Buy @ ${current_price:.2f} | "
+                    f"Entry: <${entry_price:.2f} | Target: ${target_price:.2f} | Risk: {(abs(current_price - risk_price)):.2f}¢"
+                )
+                reasoning = (
+                    f"Very strong confluence: {format_alert_type(primary_alert_type)} + {support_text}. "
+                    f"Multiple independent signals confirm buying pressure on {outcome}."
+                )
 
-            text = (
-                f"Consider {outcome} {action_text} @ ${current_price:.2f} | "
-                f"Entry: <${entry_price:.2f} | Target: ${target_price:.2f} | Risk: {(abs(current_price - risk_price)):.2f}¢"
-            )
-            reasoning = (
-                f"Strong confluence: {format_alert_type(primary_alert_type)} + {support_text}. "
-                f"Multiple independent signals confirm {action_text.lower()} pressure on {outcome}."
-            )
+                return {
+                    'action': action.value,
+                    'side': outcome,
+                    'price': current_price,
+                    'entry_price': entry_price,
+                    'target_price': target_price,
+                    'risk_price': risk_price,
+                    'text': text,
+                    'reasoning': reasoning,
+                    'confidence_level': confidence_level.value
+                }
+            else:
+                # Volume/Price: Show signal with direction
+                support_text = " + ".join([format_alert_type(a['type']) for a in supporting_anomalies[:2]])
+                direction_text = f" {price_direction}" if price_direction else ""
 
-            return {
-                'action': action.value,
-                'side': outcome,
-                'price': current_price,
-                'entry_price': entry_price,
-                'target_price': target_price,
-                'risk_price': risk_price,
-                'text': text,
-                'reasoning': reasoning,
-                'confidence_level': confidence_level.value
-            }
+                text = f"Very Strong {outcome}{direction_text} Signal @ ${current_price:.2f}"
+                reasoning = (
+                    f"Very strong confluence: {format_alert_type(primary_alert_type)} + {support_text}. "
+                    f"Multiple independent signals on {outcome}."
+                )
 
-        # High confidence (2 signals)
-        elif confidence_score >= 10 and len(supporting_anomalies) >= 1:
-            action_text = "Buy" if action == RecommendationAction.BUY else "Sell"
+                return {
+                    'action': RecommendationAction.MONITOR.value,
+                    'side': outcome,
+                    'price': current_price,
+                    'entry_price': None,
+                    'target_price': None,
+                    'risk_price': None,
+                    'text': text,
+                    'reasoning': reasoning,
+                    'confidence_level': confidence_level.value
+                }
 
-            entry_price = current_price * 1.02 if action == RecommendationAction.BUY else current_price * 0.98
+        # High confidence (2 signals) - threshold now 12.0
+        elif confidence_score >= 12 and len(supporting_anomalies) >= 1:
+            if is_actionable_alert:
+                # Whale/Coordination: Show BUY recommendation
+                entry_price = current_price * 1.02
 
-            # Format alert type enums properly
-            def format_alert_type(alert_type):
-                """Format alert type enum to human-readable string"""
-                type_str = alert_type.value if hasattr(alert_type, 'value') else str(alert_type)
-                return type_str.replace('_', ' ').title()
+                support_text = format_alert_type(supporting_anomalies[0]['type'])
 
-            support_text = format_alert_type(supporting_anomalies[0]['type'])
+                text = f"Consider {outcome} Buy @ ${current_price:.2f}"
+                reasoning = (
+                    f"{format_alert_type(primary_alert_type)} + {support_text} detected. "
+                    f"Dual signal confirmation on {outcome}."
+                )
 
-            text = f"Strong {outcome} signal - Consider {action_text.lower()} @ ${current_price:.2f}"
-            reasoning = (
-                f"{format_alert_type(primary_alert_type)} + {support_text} detected. "
-                f"Dual signal confirmation on {outcome}."
-            )
+                return {
+                    'action': action.value,
+                    'side': outcome,
+                    'price': current_price,
+                    'entry_price': entry_price,
+                    'target_price': None,
+                    'risk_price': None,
+                    'text': text,
+                    'reasoning': reasoning,
+                    'confidence_level': confidence_level.value
+                }
+            else:
+                # Volume/Price: Show signal with direction
+                support_text = format_alert_type(supporting_anomalies[0]['type'])
+                direction_text = f" {price_direction} Pressure" if price_direction else " Signal"
 
-            return {
-                'action': action.value,
-                'side': outcome,
-                'price': current_price,
-                'entry_price': entry_price,
-                'target_price': None,
-                'risk_price': None,
-                'text': text,
-                'reasoning': reasoning,
-                'confidence_level': confidence_level.value
-            }
+                text = f"Strong {outcome}{direction_text} @ ${current_price:.2f}"
+                reasoning = (
+                    f"{format_alert_type(primary_alert_type)} + {support_text} detected. "
+                    f"Dual signal confirmation on {outcome}."
+                )
+
+                return {
+                    'action': RecommendationAction.MONITOR.value,
+                    'side': outcome,
+                    'price': current_price,
+                    'entry_price': None,
+                    'target_price': None,
+                    'risk_price': None,
+                    'text': text,
+                    'reasoning': reasoning,
+                    'confidence_level': confidence_level.value
+                }
 
         # Fallback to monitor
         return self._generate_monitor_recommendation(
@@ -460,3 +555,56 @@ class RecommendationEngine:
         # High directional_bias towards BUY suggests coordinated YES buying
         directional_bias = best_window.get('directional_bias', 0.5) if best_window else 0.5
         return "YES" if directional_bias > 0.5 else "NO"
+
+    def _determine_price_direction(self, analysis: Dict, supporting_anomalies: Optional[list] = None) -> Optional[str]:
+        """
+        Determine if price is rising (buying pressure) or falling (selling pressure)
+
+        Args:
+            analysis: Primary analysis data (may contain price info)
+            supporting_anomalies: List of supporting anomalies to check for price movement data
+
+        Returns:
+            "Buying" if price trending up, "Selling" if price trending down, None if unclear
+        """
+        # Check if primary analysis has price movement data
+        if 'analysis' in analysis and isinstance(analysis['analysis'], dict):
+            price_analysis = analysis['analysis']
+            price_change_pct = price_analysis.get('price_change_pct', 0)
+            trend = price_analysis.get('trend', None)
+
+            # Use trend if available (UPTREND/DOWNTREND)
+            if trend == 'UPTREND':
+                return "Buying"
+            elif trend == 'DOWNTREND':
+                return "Selling"
+
+            # Otherwise use price change percentage (threshold: 2%)
+            if price_change_pct > 2.0:
+                return "Buying"
+            elif price_change_pct < -2.0:
+                return "Selling"
+
+        # Check supporting anomalies for Unusual Price Movement
+        if supporting_anomalies:
+            for anomaly in supporting_anomalies:
+                if anomaly.get('type') == AlertType.UNUSUAL_PRICE_MOVEMENT:
+                    # Try to extract from the anomaly's analysis if it has one
+                    anomaly_analysis = anomaly.get('analysis', {})
+                    if 'analysis' in anomaly_analysis:
+                        price_analysis = anomaly_analysis['analysis']
+                        price_change_pct = price_analysis.get('price_change_pct', 0)
+                        trend = price_analysis.get('trend', None)
+
+                        if trend == 'UPTREND':
+                            return "Buying"
+                        elif trend == 'DOWNTREND':
+                            return "Selling"
+
+                        if price_change_pct > 2.0:
+                            return "Buying"
+                        elif price_change_pct < -2.0:
+                            return "Selling"
+
+        # If we can't determine direction, return None
+        return None

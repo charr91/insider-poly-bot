@@ -314,19 +314,18 @@ class AlertManager:
     def _generate_market_url(self, alert: Dict) -> Optional[str]:
         """Generate Polymarket market URL from alert data"""
         try:
-            # Try to get slug from market data
-            market = alert.get('market', {})
-            slug = market.get('slug')
+            # Try to get slug from market_data (primary location)
+            market_data = alert.get('market_data', {})
+            slug = market_data.get('slug')
 
             if slug:
                 return f"https://polymarket.com/event/{slug}"
 
-            # Fallback: try to get from market_id if it contains slug info
-            market_id = alert.get('market_id')
-            if market_id and isinstance(market_id, dict):
-                slug = market_id.get('slug')
-                if slug:
-                    return f"https://polymarket.com/event/{slug}"
+            # Fallback: try old location for backwards compatibility
+            market = alert.get('market', {})
+            slug = market.get('slug')
+            if slug:
+                return f"https://polymarket.com/event/{slug}"
 
             logger.debug(f"No slug found for market {alert.get('market_question', 'Unknown')}")
             return None

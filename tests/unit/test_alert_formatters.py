@@ -187,3 +187,247 @@ class TestTelegramFormatter:
         # Verify HTML is escaped
         # This is basic check - html.escape() should handle this
         assert '&lt;script&gt;' in message or '<script>' not in message
+
+
+class TestRelatedOutcomesDisplay:
+    """Test related outcomes display with both YES and NO prices"""
+
+    def test_related_outcomes_both_prices_discord(self):
+        """Test that Discord formatter shows both YES and NO prices for related outcomes."""
+        from datetime import timezone
+
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will there be 3 Fed rate cuts in 2025?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 8.0,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'analysis': {'max_anomaly_score': 5.0},
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.75,
+                'outcomePrices': ['0.75', '0.25']
+            },
+            'related_markets': [
+                {'question': 'Will there be 2 Fed rate cuts in 2025?', 'yes_price': 0.12, 'no_price': 0.88},
+                {'question': 'Will there be 4 Fed rate cuts in 2025?', 'yes_price': 0.07, 'no_price': 0.93}
+            ]
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = DiscordFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Find related outcomes field
+        related_field = next((f for f in result['fields'] if 'OTHER OUTCOMES' in f['name']), None)
+        assert related_field is not None
+        assert 'YES' in related_field['value']
+        assert 'NO' in related_field['value']
+        assert '12¢ YES / 88¢ NO' in related_field['value']
+        assert '7¢ YES / 93¢ NO' in related_field['value']
+
+    def test_related_outcomes_both_prices_telegram(self):
+        """Test that Telegram formatter shows both YES and NO prices for related outcomes."""
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will there be 3 Fed rate cuts in 2025?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 8.0,
+            'timestamp': datetime.now(),
+            'analysis': {'max_anomaly_score': 5.0},
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.75,
+                'outcomePrices': ['0.75', '0.25']
+            },
+            'related_markets': [
+                {'question': 'Will there be 2 Fed rate cuts in 2025?', 'yes_price': 0.12, 'no_price': 0.88},
+                {'question': 'Will there be 4 Fed rate cuts in 2025?', 'yes_price': 0.07, 'no_price': 0.93}
+            ]
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = TelegramFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        assert 'OTHER OUTCOMES' in result
+        assert 'YES' in result
+        assert 'NO' in result
+        assert '12¢ YES / 88¢ NO' in result
+        assert '7¢ YES / 93¢ NO' in result
+
+
+class TestDirectionDisplay:
+    """Test direction display for volume spikes with low/no imbalance"""
+
+    def test_balanced_pressure_discord(self):
+        """Test that Discord formatter shows clarifying message for unknown outcome with low pressure."""
+        from datetime import timezone
+
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 8.0,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'analysis': {
+                'max_anomaly_score': 5.0,
+                'dominant_outcome': 'YES',
+                'dominant_side': 'BUY',
+                'outcome_imbalance': 0.05,  # 5% = no clear direction
+                'side_imbalance': 0.02       # 2% = balanced
+            },
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.75,
+                'outcomePrices': ['0.75', '0.25']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = DiscordFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Find detected field
+        detected_field = next((f for f in result['fields'] if 'DETECTED' in f['name']), None)
+        assert detected_field is not None
+        # Should show clarifying message
+        assert 'Balanced pressure (outcome unknown)' in detected_field['value']
+        assert '5%' not in detected_field['value']  # Shouldn't show low percentages
+        assert '2%' not in detected_field['value']
+
+    def test_strong_direction_discord(self):
+        """Test that Discord formatter shows percentages for strong direction."""
+        from datetime import timezone
+
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 8.0,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'analysis': {
+                'max_anomaly_score': 5.0,
+                'dominant_outcome': 'YES',
+                'dominant_side': 'SELL',
+                'outcome_imbalance': 0.78,  # 78% = strong
+                'side_imbalance': 0.85       # 85% = strong
+            },
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.75,
+                'outcomePrices': ['0.75', '0.25']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = DiscordFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Find detected field
+        detected_field = next((f for f in result['fields'] if 'DETECTED' in f['name']), None)
+        assert detected_field is not None
+        # Should show strong percentages
+        assert '78% YES' in detected_field['value']
+        assert '85% SELL' in detected_field['value']
+
+    def test_balanced_pressure_telegram(self):
+        """Test that Telegram formatter shows clarifying message for unknown outcome with low pressure."""
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 8.0,
+            'timestamp': datetime.now(),
+            'analysis': {
+                'max_anomaly_score': 5.0,
+                'dominant_outcome': 'YES',
+                'dominant_side': 'BUY',
+                'outcome_imbalance': 0.03,  # 3% = no clear direction
+                'side_imbalance': 0.01       # 1% = balanced
+            },
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.75,
+                'outcomePrices': ['0.75', '0.25']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = TelegramFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Should show clarifying message
+        assert 'Balanced pressure (outcome unknown)' in result
+        assert '3%' not in result  # Shouldn't show low percentages
+        assert '1%' not in result
+
+    def test_strong_pressure_unknown_outcome_discord(self):
+        """Test Discord formatter shows pressure with clarification when outcome unknown."""
+        from datetime import timezone
+
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 8.0,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'analysis': {
+                'max_anomaly_score': 5.0,
+                'dominant_outcome': 'YES',
+                'dominant_side': 'SELL',
+                'outcome_imbalance': 0.05,  # 5% = no outcome data
+                'side_imbalance': 0.80       # 80% = strong SELL
+            },
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.75,
+                'outcomePrices': ['0.75', '0.25']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = DiscordFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Find detected field
+        detected_field = next((f for f in result['fields'] if 'DETECTED' in f['name']), None)
+        assert detected_field is not None
+        # Should show clear message about unknown outcome
+        assert '80% SELL pressure (outcome unknown)' in detected_field['value']
+
+    def test_strong_pressure_unknown_outcome_telegram(self):
+        """Test Telegram formatter shows pressure with clarification when outcome unknown."""
+        alert = {
+            'severity': 'HIGH',
+            'market_question': 'Will Bitcoin reach $100k?',
+            'alert_type': AlertType.VOLUME_SPIKE,
+            'confidence_score': 8.0,
+            'timestamp': datetime.now(),
+            'analysis': {
+                'max_anomaly_score': 5.0,
+                'dominant_outcome': 'YES',
+                'dominant_side': 'SELL',
+                'outcome_imbalance': 0.05,  # 5% = no outcome data
+                'side_imbalance': 0.80       # 80% = strong SELL
+            },
+            'market_data': {
+                'volume24hr': 150000,
+                'lastTradePrice': 0.75,
+                'outcomePrices': ['0.75', '0.25']
+            }
+        }
+
+        recommendation = {'action': 'MONITOR', 'text': 'Watch', 'reasoning': 'Test'}
+
+        formatter = TelegramFormatter()
+        result = formatter.format_alert(alert, recommendation)
+
+        # Should show clear message about unknown outcome
+        assert '80% SELL pressure (outcome unknown)' in result

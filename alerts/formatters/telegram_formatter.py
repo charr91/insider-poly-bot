@@ -5,6 +5,8 @@ Formats alerts as HTML messages for Telegram following the PoliWhale Alerts desi
 
 from typing import Dict, Optional
 from datetime import datetime
+from alerts.recommendation_engine import format_confidence_display
+from alerts.formatters.format_utils import format_market_price, format_volume, extract_outcome_name, _format_single_price
 import html
 import logging
 
@@ -55,29 +57,37 @@ class TelegramFormatter:
         sections.append(severity_line)
         sections.append("")  # Blank line
 
-        # Recommendation section
+        # Market section (position 1 - includes link)
+        sections.append(self._format_market_info(alert, market_question, market_url))
+        sections.append("")
+
+        # Detected section (position 2)
+        sections.append(self._format_detected_info(alert_type_str, analysis, alert))
+        sections.append("")
+
+        # Recommendation section (position 3)
         if recommendation:
             sections.append(self._format_recommendation(recommendation))
             sections.append("")
 
-        # Market section
-        sections.append(self._format_market_info(alert, market_question))
-        sections.append("")
-
-        # Detected section
-        sections.append(self._format_detected_info(alert_type_str, analysis, alert))
-        sections.append("")
-
-        # Trade details if available
+        # Trade details if available (position 4 - for whale/coordination alerts)
         if alert_type_str in ['WHALE_ACTIVITY', 'COORDINATED_TRADING']:
             trade_details = self._format_trade_details(analysis)
             if trade_details:
                 sections.append(trade_details)
                 sections.append("")
 
-        # Confidence score (cap at 100)
-        confidence_pct = min(int((confidence_score / 10) * 100), 100)
-        sections.append(f"📈 <b>CONFIDENCE:</b> {confidence_pct}/100")
+        # Related outcomes for grouped markets (position 5)
+        related_markets = alert.get('related_markets', [])
+        if related_markets and len(related_markets) > 0:
+            related_outcomes_text = self._format_related_outcomes(related_markets)
+            sections.append(related_outcomes_text)
+            sections.append("")
+
+        # Confidence score with label (hybrid format)
+        is_multi_metric = alert.get('multi_metric', False)
+        confidence_label, confidence_pct = format_confidence_display(confidence_score, is_multi_metric)
+        sections.append(f"📈 <b>{confidence_label.upper()} CONFIDENCE:</b> {confidence_pct}/100")
 
         # Latency (time since alert was created)
         alert_time = alert.get('timestamp')
@@ -85,12 +95,6 @@ class TelegramFormatter:
             time_diff = (datetime.now() - alert_time).total_seconds()
             latency_str = self._format_latency(time_diff)
             sections.append(f"⏱️ <b>Latency:</b> {latency_str}")
-
-        sections.append("")
-
-        # View market link
-        if market_url:
-            sections.append(f'<a href="{html.escape(market_url)}">View Market</a>')
 
         # Join all sections with newlines
         return "\n".join(sections)
@@ -119,26 +123,24 @@ class TelegramFormatter:
 
         return "\n".join(lines)
 
-    def _format_market_info(self, alert: Dict, market_question: str) -> str:
+    def _format_market_info(self, alert: Dict, market_question: str, market_url: Optional[str] = None) -> str:
         """Format market information section"""
         market_data = alert.get('market_data', {})
-        volume_24hr = market_data.get('volume24hr', 0)
-        last_price = market_data.get('lastTradePrice', 0)
 
-        # Format volume
-        if volume_24hr >= 1000000:
-            volume_str = f"${volume_24hr/1000000:.1f}M"
-        elif volume_24hr >= 1000:
-            volume_str = f"${volume_24hr/1000:.0f}K"
-        else:
-            volume_str = f"${volume_24hr:.0f}"
+        # Use shared formatting utilities
+        price_str = format_market_price(market_data)
+        volume_str = format_volume(market_data.get('volume24hr', 0))
 
         lines = [
             "🎯 <b>MARKET:</b>",
             html.escape(market_question),
-            f"Current: {last_price:.2f}¢ YES",  # Simplified for now
+            f"Current: {price_str}",
             f"Volume: {volume_str}"
         ]
+
+        # Add market link if available (centralized in market section)
+        if market_url:
+            lines.append(f'<a href="{html.escape(market_url)}">View Market</a>')
 
         return "\n".join(lines)
 
@@ -153,6 +155,28 @@ class TelegramFormatter:
         if alert_type_str == 'VOLUME_SPIKE':
             anomaly_score = analysis.get('max_anomaly_score', 0)
             lines.append(f"<b>Score:</b> {anomaly_score:.1f}x normal")
+
+            # Add directional information if available
+            dominant_outcome = analysis.get('dominant_outcome', 'UNKNOWN')
+            dominant_side = analysis.get('dominant_side', 'UNKNOWN')
+            outcome_imbalance = analysis.get('outcome_imbalance', 0)
+            side_imbalance = analysis.get('side_imbalance', 0)
+
+            # Show outcome and pressure information
+            # If we can determine outcome, show it; otherwise show pressure with note
+            if dominant_outcome != 'UNKNOWN' and outcome_imbalance >= 0.10:
+                # We have outcome data and clear direction
+                lines.append(f"<b>Outcome:</b> {outcome_imbalance*100:.0f}% {dominant_outcome}")
+                # Also show pressure if meaningful
+                if dominant_side != 'UNKNOWN' and side_imbalance >= 0.10:
+                    lines.append(f"<b>Pressure:</b> {side_imbalance*100:.0f}% {dominant_side}")
+            else:
+                # No outcome data - show pressure with clarification
+                if dominant_side != 'UNKNOWN':
+                    if side_imbalance < 0.10:
+                        lines.append(f"<b>Volume:</b> Balanced pressure (outcome unknown)")
+                    else:
+                        lines.append(f"<b>Volume:</b> {side_imbalance*100:.0f}% {dominant_side} pressure (outcome unknown)")
 
         elif alert_type_str == 'WHALE_ACTIVITY':
             total_volume = analysis.get('total_whale_volume', 0)
@@ -248,3 +272,18 @@ class TelegramFormatter:
             hours = int(seconds / 3600)
             minutes = int((seconds % 3600) / 60)
             return f"{hours}h {minutes}m" if minutes > 0 else f"{hours}h"
+
+    def _format_related_outcomes(self, related_markets: list) -> str:
+        """Format related outcomes for grouped markets"""
+        lines = ["📊 <b>OTHER OUTCOMES:</b>"]
+
+        for rm in related_markets:
+            # Extract short outcome name
+            outcome = extract_outcome_name(rm['question'])
+            # Format both YES and NO prices
+            yes_str = _format_single_price(rm['yes_price'])
+            no_str = _format_single_price(rm['no_price'])
+            # Add bullet point with both prices (HTML escaped)
+            lines.append(f"• {html.escape(outcome)}: {yes_str} YES / {no_str} NO")
+
+        return "\n".join(lines)
