@@ -1466,11 +1466,11 @@ class MarketMonitor:
                 # For coordination, use the side with more activity
                 predicted_direction = analysis.get('dominant_side', 'BUY')
             elif alert_type_str == 'VOLUME_SPIKE':
-                # For volume spikes, use the dominant outcome (YES/NO)
-                predicted_direction = analysis.get('dominant_outcome', 'YES')
-                # If outcome is unknown, fallback to dominant side (BUY/SELL)
-                if predicted_direction == 'UNKNOWN':
-                    predicted_direction = analysis.get('dominant_side', 'BUY')
+                # For volume spikes, use the dominant side (BUY/SELL), not outcome (YES/NO)
+                predicted_direction = analysis.get('dominant_side', 'BUY')
+            elif alert_type_str == 'FRESH_WALLET_LARGE_BET':
+                # For fresh wallet bets, use the trade side
+                predicted_direction = analysis.get('side', 'BUY')
 
             # Create outcome record
             await self.outcome_tracker.create_outcome_record(

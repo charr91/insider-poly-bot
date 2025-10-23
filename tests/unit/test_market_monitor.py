@@ -405,12 +405,245 @@ class TestErrorHandling:
     def test_handle_realtime_trade_invalid_data(self):
         """Test trade handling with invalid data"""
         monitor = MarketMonitor('test_config.json')
-        
+
         # Test with missing required fields
         invalid_trade = {'invalid': 'data'}
-        
+
         # Should not crash
         monitor._handle_realtime_trade(invalid_trade)
-        
+
         # Should not add to trade history
         assert len(monitor.trade_history) == 0
+
+
+class TestOutcomeTracking:
+    """Test outcome tracking initialization and direction determination"""
+
+    @pytest.mark.asyncio
+    @patch('market_monitor.MarketMonitor._load_config')
+    @patch('database.AlertRepository')
+    async def test_outcome_tracking_whale_activity(self, mock_alert_repo_class, mock_load_config, mock_config):
+        """Test outcome tracking uses dominant_side for WHALE_ACTIVITY"""
+        mock_load_config.return_value = mock_config
+        monitor = MarketMonitor('test_config.json')
+
+        # Mock AlertRepository instance
+        mock_alert_repo = AsyncMock()
+        mock_alert = Mock()
+        mock_alert.id = 123
+        mock_alert_repo.get_recent_alerts = AsyncMock(return_value=[mock_alert])
+        mock_alert_repo_class.return_value = mock_alert_repo
+
+        # Mock database session
+        with patch.object(monitor.db_manager, 'session') as mock_session:
+            mock_session_instance = AsyncMock()
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+
+            # Mock outcome tracker
+            monitor.outcome_tracker.create_outcome_record = AsyncMock()
+
+            alert = {
+                'alert_type': 'WHALE_ACTIVITY',
+                'analysis': {'dominant_side': 'SELL'},
+                'market_data': {'lastTradePrice': '0.65'}
+            }
+
+            await monitor._initialize_outcome_tracking(alert, 'test_market_id')
+
+            # Verify outcome tracker was called with SELL (not YES/NO)
+            monitor.outcome_tracker.create_outcome_record.assert_called_once()
+            call_args = monitor.outcome_tracker.create_outcome_record.call_args
+            assert call_args[1]['predicted_direction'] == 'SELL'
+
+    @pytest.mark.asyncio
+    @patch('market_monitor.MarketMonitor._load_config')
+    @patch('database.AlertRepository')
+    async def test_outcome_tracking_volume_spike_uses_side_not_outcome(self, mock_alert_repo_class, mock_load_config, mock_config):
+        """Test outcome tracking uses dominant_side for VOLUME_SPIKE (not dominant_outcome)"""
+        mock_load_config.return_value = mock_config
+        monitor = MarketMonitor('test_config.json')
+
+        # Mock AlertRepository instance
+        mock_alert_repo = AsyncMock()
+        mock_alert = Mock()
+        mock_alert.id = 456
+        mock_alert_repo.get_recent_alerts = AsyncMock(return_value=[mock_alert])
+        mock_alert_repo_class.return_value = mock_alert_repo
+
+        # Mock database session
+        with patch.object(monitor.db_manager, 'session') as mock_session:
+            mock_session_instance = AsyncMock()
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+
+            # Mock outcome tracker
+            monitor.outcome_tracker.create_outcome_record = AsyncMock()
+
+            alert = {
+                'alert_type': 'VOLUME_SPIKE',
+                'analysis': {
+                    'dominant_outcome': 'NO',  # This should NOT be used
+                    'dominant_side': 'BUY'     # This SHOULD be used
+                },
+                'market_data': {'lastTradePrice': '0.45'}
+            }
+
+            await monitor._initialize_outcome_tracking(alert, 'test_market_id')
+
+            # Verify outcome tracker was called with BUY (not NO)
+            monitor.outcome_tracker.create_outcome_record.assert_called_once()
+            call_args = monitor.outcome_tracker.create_outcome_record.call_args
+            assert call_args[1]['predicted_direction'] == 'BUY'
+            # Ensure it's NOT the outcome value
+            assert call_args[1]['predicted_direction'] != 'NO'
+
+    @pytest.mark.asyncio
+    @patch('market_monitor.MarketMonitor._load_config')
+    @patch('database.AlertRepository')
+    async def test_outcome_tracking_coordinated_trading(self, mock_alert_repo_class, mock_load_config, mock_config):
+        """Test outcome tracking uses dominant_side for COORDINATED_TRADING"""
+        mock_load_config.return_value = mock_config
+        monitor = MarketMonitor('test_config.json')
+
+        # Mock AlertRepository instance
+        mock_alert_repo = AsyncMock()
+        mock_alert = Mock()
+        mock_alert.id = 789
+        mock_alert_repo.get_recent_alerts = AsyncMock(return_value=[mock_alert])
+        mock_alert_repo_class.return_value = mock_alert_repo
+
+        # Mock database session
+        with patch.object(monitor.db_manager, 'session') as mock_session:
+            mock_session_instance = AsyncMock()
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+
+            # Mock outcome tracker
+            monitor.outcome_tracker.create_outcome_record = AsyncMock()
+
+            alert = {
+                'alert_type': 'COORDINATED_TRADING',
+                'analysis': {'dominant_side': 'BUY'},
+                'market_data': {'lastTradePrice': '0.55'}
+            }
+
+            await monitor._initialize_outcome_tracking(alert, 'test_market_id')
+
+            # Verify outcome tracker was called with BUY
+            monitor.outcome_tracker.create_outcome_record.assert_called_once()
+            call_args = monitor.outcome_tracker.create_outcome_record.call_args
+            assert call_args[1]['predicted_direction'] == 'BUY'
+
+    @pytest.mark.asyncio
+    @patch('market_monitor.MarketMonitor._load_config')
+    @patch('database.AlertRepository')
+    async def test_outcome_tracking_fresh_wallet(self, mock_alert_repo_class, mock_load_config, mock_config):
+        """Test outcome tracking uses side for FRESH_WALLET_LARGE_BET"""
+        mock_load_config.return_value = mock_config
+        monitor = MarketMonitor('test_config.json')
+
+        # Mock AlertRepository instance
+        mock_alert_repo = AsyncMock()
+        mock_alert = Mock()
+        mock_alert.id = 999
+        mock_alert_repo.get_recent_alerts = AsyncMock(return_value=[mock_alert])
+        mock_alert_repo_class.return_value = mock_alert_repo
+
+        # Mock database session
+        with patch.object(monitor.db_manager, 'session') as mock_session:
+            mock_session_instance = AsyncMock()
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+
+            # Mock outcome tracker
+            monitor.outcome_tracker.create_outcome_record = AsyncMock()
+
+            alert = {
+                'alert_type': 'FRESH_WALLET_LARGE_BET',
+                'analysis': {'side': 'SELL'},
+                'market_data': {'lastTradePrice': '0.72'}
+            }
+
+            await monitor._initialize_outcome_tracking(alert, 'test_market_id')
+
+            # Verify outcome tracker was called with SELL
+            monitor.outcome_tracker.create_outcome_record.assert_called_once()
+            call_args = monitor.outcome_tracker.create_outcome_record.call_args
+            assert call_args[1]['predicted_direction'] == 'SELL'
+
+    @pytest.mark.asyncio
+    @patch('market_monitor.MarketMonitor._load_config')
+    @patch('database.AlertRepository')
+    async def test_outcome_tracking_default_direction(self, mock_alert_repo_class, mock_load_config, mock_config):
+        """Test outcome tracking defaults to BUY when direction missing"""
+        mock_load_config.return_value = mock_config
+        monitor = MarketMonitor('test_config.json')
+
+        # Mock AlertRepository instance
+        mock_alert_repo = AsyncMock()
+        mock_alert = Mock()
+        mock_alert.id = 111
+        mock_alert_repo.get_recent_alerts = AsyncMock(return_value=[mock_alert])
+        mock_alert_repo_class.return_value = mock_alert_repo
+
+        # Mock database session
+        with patch.object(monitor.db_manager, 'session') as mock_session:
+            mock_session_instance = AsyncMock()
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+
+            # Mock outcome tracker
+            monitor.outcome_tracker.create_outcome_record = AsyncMock()
+
+            alert = {
+                'alert_type': 'WHALE_ACTIVITY',
+                'analysis': {},  # No dominant_side
+                'market_data': {'lastTradePrice': '0.50'}
+            }
+
+            await monitor._initialize_outcome_tracking(alert, 'test_market_id')
+
+            # Verify outcome tracker defaults to BUY
+            monitor.outcome_tracker.create_outcome_record.assert_called_once()
+            call_args = monitor.outcome_tracker.create_outcome_record.call_args
+            assert call_args[1]['predicted_direction'] == 'BUY'
+
+    @pytest.mark.asyncio
+    @patch('market_monitor.MarketMonitor._load_config')
+    @patch('database.AlertRepository')
+    async def test_outcome_tracking_no_alert_found(self, mock_alert_repo_class, mock_load_config, mock_config):
+        """Test outcome tracking handles case when alert not found in database"""
+        mock_load_config.return_value = mock_config
+        monitor = MarketMonitor('test_config.json')
+
+        # Mock AlertRepository instance
+        mock_alert_repo = AsyncMock()
+        mock_alert_repo.get_recent_alerts = AsyncMock(return_value=[])  # No alerts
+        mock_alert_repo_class.return_value = mock_alert_repo
+
+        # Mock database session
+        with patch.object(monitor.db_manager, 'session') as mock_session:
+            mock_session_instance = AsyncMock()
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+
+            # Mock outcome tracker
+            monitor.outcome_tracker.create_outcome_record = AsyncMock()
+
+            alert = {
+                'alert_type': 'WHALE_ACTIVITY',
+                'analysis': {'dominant_side': 'BUY'},
+                'market_data': {'lastTradePrice': '0.50'}
+            }
+
+            await monitor._initialize_outcome_tracking(alert, 'test_market_id')
+
+            # Verify outcome tracker was NOT called
+            monitor.outcome_tracker.create_outcome_record.assert_not_called()
