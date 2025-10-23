@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 import json
 from pathlib import Path
+import aiohttp
 from colorama import init, Fore, Back, Style
 
 # Initialize colorama
