@@ -275,10 +275,12 @@ class RecommendationEngine:
         # Determine outcome and action from primary alert type
         if primary_alert_type == AlertType.WHALE_ACTIVITY:
             outcome = self._determine_outcome_from_whales(analysis)
+            # Whale detector returns 'dominant_side', not 'dominant_direction'
             dominant_side = analysis.get('dominant_side', 'BUY')
             action = RecommendationAction.BUY if dominant_side == 'BUY' else RecommendationAction.SELL
         elif primary_alert_type == AlertType.COORDINATED_TRADING:
             outcome = self._determine_outcome_from_coordination(analysis)
+            # Coordination detector returns 'dominant_direction'
             dominant_direction = analysis.get('dominant_direction', 'BUY')
             action = RecommendationAction.BUY if dominant_direction == 'BUY' else RecommendationAction.SELL
 
@@ -291,16 +293,20 @@ class RecommendationEngine:
             target_price = current_price * 1.30 if action == RecommendationAction.BUY else current_price * 0.70
             risk_price = current_price * 0.90 if action == RecommendationAction.BUY else current_price * 1.10
 
-            # Build supporting signals text
-            support_text = " + ".join([a['type'].value if hasattr(a['type'], 'value') else str(a['type'])
-                                       for a in supporting_anomalies[:2]])
+            # Build supporting signals text - format enum values properly
+            def format_alert_type(alert_type):
+                """Format alert type enum to human-readable string"""
+                type_str = alert_type.value if hasattr(alert_type, 'value') else str(alert_type)
+                return type_str.replace('_', ' ').title()
+
+            support_text = " + ".join([format_alert_type(a['type']) for a in supporting_anomalies[:2]])
 
             text = (
                 f"Consider {outcome} {action_text} @ ${current_price:.2f} | "
                 f"Entry: <${entry_price:.2f} | Target: ${target_price:.2f} | Risk: {(abs(current_price - risk_price)):.2f}¢"
             )
             reasoning = (
-                f"Strong confluence: {primary_alert_type.value if hasattr(primary_alert_type, 'value') else primary_alert_type} + {support_text}. "
+                f"Strong confluence: {format_alert_type(primary_alert_type)} + {support_text}. "
                 f"Multiple independent signals confirm {action_text.lower()} pressure on {outcome}."
             )
 
@@ -322,11 +328,17 @@ class RecommendationEngine:
 
             entry_price = current_price * 1.02 if action == RecommendationAction.BUY else current_price * 0.98
 
-            support_text = supporting_anomalies[0]['type'].value if hasattr(supporting_anomalies[0]['type'], 'value') else str(supporting_anomalies[0]['type'])
+            # Format alert type enums properly
+            def format_alert_type(alert_type):
+                """Format alert type enum to human-readable string"""
+                type_str = alert_type.value if hasattr(alert_type, 'value') else str(alert_type)
+                return type_str.replace('_', ' ').title()
+
+            support_text = format_alert_type(supporting_anomalies[0]['type'])
 
             text = f"Strong {outcome} signal - Consider {action_text.lower()} @ ${current_price:.2f}"
             reasoning = (
-                f"{primary_alert_type.value if hasattr(primary_alert_type, 'value') else primary_alert_type} + {support_text} detected. "
+                f"{format_alert_type(primary_alert_type)} + {support_text} detected. "
                 f"Dual signal confirmation on {outcome}."
             )
 

@@ -202,15 +202,15 @@ class AlertManager:
             else:
                 logger.debug("📱 Discord webhook not configured")
 
-            # Telegram routing decision
-            if self.telegram_notifier.is_enabled() and self.telegram_enabled:
+            # Telegram routing decision (consistent with Discord pattern)
+            if self.telegram_notifier.is_enabled():
                 if alert_severity_level >= self.telegram_min_severity_level:
                     logger.debug(f"📱 Sending to Telegram: {alert.get('severity')} alert (level {alert_severity_level}) >= {self.telegram_min_severity} threshold")
                     await self._send_telegram_alert(alert, recommendation, market_url)
                 else:
                     logger.debug(f"📱 Skipping Telegram: {alert.get('severity')} alert (level {alert_severity_level}) below {self.telegram_min_severity} threshold")
             else:
-                logger.debug("📱 Telegram notifications disabled")
+                logger.debug("📱 Telegram notifications disabled (bot token or chat ID not configured)")
 
             # Record alert using storage
             # Pass the full alert dict to capture all fields (analysis, confidence_score, etc.)

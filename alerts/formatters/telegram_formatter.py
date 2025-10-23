@@ -75,8 +75,8 @@ class TelegramFormatter:
                 sections.append(trade_details)
                 sections.append("")
 
-        # Confidence score
-        confidence_pct = int((confidence_score / 10) * 100)
+        # Confidence score (cap at 100)
+        confidence_pct = min(int((confidence_score / 10) * 100), 100)
         sections.append(f"📈 <b>CONFIDENCE:</b> {confidence_pct}/100")
 
         # Latency (time since alert was created)
@@ -222,13 +222,14 @@ class TelegramFormatter:
             f"<b>Top Whale:</b> {volume_str} {top_whale['side']} @ ${top_whale['avg_price']:.2f}"
         ]
 
-        # Add wallet address (shortened with link)
-        wallet_short = f"{top_whale['wallet'][:6]}...{top_whale['wallet'][-4:]}"
-        wallet_url = f"https://polygonscan.com/address/{top_whale['wallet']}"
-        lines.append(f'<b>Wallet:</b> <a href="{wallet_url}">{html.escape(wallet_short)}</a>')
+        # Add wallet address (shortened with link) - skip if unknown
+        if top_whale['wallet'] and top_whale['wallet'] != 'unknown':
+            wallet_short = f"{top_whale['wallet'][:6]}...{top_whale['wallet'][-4:]}"
+            wallet_url = f"https://polygonscan.com/address/{top_whale['wallet']}"
+            lines.append(f'<b>Wallet:</b> <a href="{wallet_url}">{html.escape(wallet_short)}</a>')
 
         # Add transaction link if available
-        if top_whale.get('tx_hash'):
+        if top_whale.get('tx_hash') and top_whale['tx_hash'] != 'unknown':
             tx_short = f"{top_whale['tx_hash'][:6]}...{top_whale['tx_hash'][-4:]}"
             tx_url = f"https://polygonscan.com/tx/{top_whale['tx_hash']}"
             lines.append(f'<b>Tx:</b> <a href="{tx_url}">{html.escape(tx_short)}</a>')

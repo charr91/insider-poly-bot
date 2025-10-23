@@ -101,8 +101,8 @@ class DiscordFormatter:
                     "inline": False
                 })
 
-        # Add confidence score footer
-        confidence_pct = int((confidence_score / 10) * 100)
+        # Add confidence score footer (cap at 100)
+        confidence_pct = min(int((confidence_score / 10) * 100), 100)
         embed["footer"] = {
             "text": f"📈 Confidence: {confidence_pct}/100"
         }
@@ -218,13 +218,14 @@ class DiscordFormatter:
             f"**Top Whale:** ${top_whale['volume']/1000:.1f}K {top_whale['side']} @ ${top_whale['avg_price']:.2f}"
         ]
 
-        # Add wallet address (shortened)
-        wallet_short = f"{top_whale['wallet'][:6]}...{top_whale['wallet'][-4:]}"
-        wallet_url = f"https://polygonscan.com/address/{top_whale['wallet']}"
-        lines.append(f"**Wallet:** [{wallet_short}]({wallet_url})")
+        # Add wallet address (shortened) - skip if unknown
+        if top_whale['wallet'] and top_whale['wallet'] != 'unknown':
+            wallet_short = f"{top_whale['wallet'][:6]}...{top_whale['wallet'][-4:]}"
+            wallet_url = f"https://polygonscan.com/address/{top_whale['wallet']}"
+            lines.append(f"**Wallet:** [{wallet_short}]({wallet_url})")
 
         # Add transaction link if available
-        if top_whale.get('tx_hash'):
+        if top_whale.get('tx_hash') and top_whale['tx_hash'] != 'unknown':
             tx_short = f"{top_whale['tx_hash'][:6]}...{top_whale['tx_hash'][-4:]}"
             tx_url = f"https://polygonscan.com/tx/{top_whale['tx_hash']}"
             lines.append(f"**Tx:** [{tx_short}]({tx_url})")

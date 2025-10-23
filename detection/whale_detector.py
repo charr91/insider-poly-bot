@@ -36,13 +36,22 @@ class WhaleDetector(DetectorBase):
         
         # Normalize trade data using utility (timestamps not required for whale detection)
         normalized_trades = TradeNormalizer.normalize_trades(trades, require_timestamp=False)
-        
+
         if not normalized_trades:
             return create_consistent_early_return(
-                anomaly=False, 
+                anomaly=False,
                 reason='No valid trades after normalization'
             )
-        
+
+        # Filter out trades with 'unknown' maker addresses
+        normalized_trades = [t for t in normalized_trades if t.get('maker', 'unknown') != 'unknown']
+
+        if not normalized_trades:
+            return create_consistent_early_return(
+                anomaly=False,
+                reason='No valid maker addresses after filtering'
+            )
+
         df = pd.DataFrame(normalized_trades)
         # volume_usd already calculated in normalization
         
@@ -84,7 +93,8 @@ class WhaleDetector(DetectorBase):
         # Build aggregation dict
         agg_dict = {
             'volume_usd': ['sum', 'count', 'mean'],
-            'side': lambda x: x.mode().iloc[0] if len(x) > 0 else 'BUY'
+            'side': lambda x: x.mode().iloc[0] if len(x) > 0 else 'BUY',
+            'price': 'mean'  # Add average price tracking
         }
 
         # Add asset_id aggregation only if it exists in the data
@@ -96,9 +106,9 @@ class WhaleDetector(DetectorBase):
 
         # Flatten column names
         if 'asset_id' in whale_trades.columns:
-            whale_breakdown.columns = ['total_volume', 'trade_count', 'avg_trade_size', 'preferred_side', 'asset_id']
+            whale_breakdown.columns = ['total_volume', 'trade_count', 'avg_trade_size', 'dominant_side', 'avg_price', 'asset_id']
         else:
-            whale_breakdown.columns = ['total_volume', 'trade_count', 'avg_trade_size', 'preferred_side']
+            whale_breakdown.columns = ['total_volume', 'trade_count', 'avg_trade_size', 'dominant_side', 'avg_price']
         
         # Sort by total volume
         top_whales = whale_breakdown.nlargest(10, 'total_volume')
