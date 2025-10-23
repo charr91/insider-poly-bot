@@ -48,8 +48,10 @@ class MarketMonitor:
         self.db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
 
         # Initialize data sources
+        # DataAPIClient will be initialized in start_monitoring() for proper async context
         self.data_api = DataAPIClient()
         self.websocket_client = None
+        self.gamma_session = None  # Session for Gamma API requests
 
         # Initialize detection algorithms
         self.volume_detector = VolumeDetector(self.config)
@@ -147,6 +149,16 @@ class MarketMonitor:
         """Start the market monitoring system"""
         logger.info("🚀 Starting Market Monitor")
 
+        # Initialize async sessions
+        await self.data_api.__aenter__()
+
+        # Create persistent session for Gamma API to prevent memory leaks
+        import aiohttp
+        self.gamma_session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            headers={'User-Agent': 'PolymarketInsiderBot/1.0'}
+        )
+
         # Initialize database
         logger.info("📊 Initializing database...")
         await self.db_manager.init_db()
@@ -189,25 +201,32 @@ class MarketMonitor:
         """Stop the monitoring system"""
         logger.info("🛑 Stopping Market Monitor")
         self.running = False
-        
+
         if self.websocket_client:
             self.websocket_client.disconnect()
+
+        # Close HTTP sessions to prevent memory leaks
+        if self.data_api:
+            await self.data_api.close()
+
+        if self.gamma_session and not self.gamma_session.closed:
+            await self.gamma_session.close()
     
     async def _test_connections(self) -> bool:
         """Test all external connections"""
         logger.info("🔍 Testing connections...")
-        
+
         # Test Data API
-        if not self.data_api.test_connection():
+        if not await self.data_api.test_connection():
             logger.error("❌ Data API connection failed")
             return False
-        
+
         logger.info("✅ Data API connection successful")
-        
+
         # Test WebSocket (will be tested when markets are discovered)
         # Test alert systems
         await self.alert_manager.test_connections()
-        
+
         return True
     
     async def _market_discovery_loop(self):
@@ -219,105 +238,119 @@ class MarketMonitor:
             except Exception as e:
                 logger.error(f"Error in market discovery: {e}")
                 await asyncio.sleep(60)  # Wait before retrying
+
+        # Log if loop exits
+        logger.error(f"❌ CRITICAL: market_discovery_loop exited! self.running={self.running}")
     
     async def _discover_markets(self):
         """Discover high-volume markets to monitor"""
         logger.info("🔍 Discovering markets...")
-        
-        # Use the existing gamma API logic from insider_bot.py
-        import aiohttp
-        
-        async with aiohttp.ClientSession() as session:
-            gamma_api = "https://gamma-api.polymarket.com"
-            volume_threshold = self.config.get('monitoring', {}).get('volume_threshold', 1000)
-            max_markets = self.config.get('monitoring', {}).get('max_markets', 50)
-            sort_by_volume = self.config.get('monitoring', {}).get('sort_by_volume', True)
-            
-            async with session.get(f"{gamma_api}/markets?active=true&closed=false&limit={max_markets}") as resp:
-                if resp.status != 200:
-                    logger.error(f"Failed to fetch markets: HTTP {resp.status}")
-                    return
-                
-                markets = await resp.json()
-                
-                # Handle different response formats
-                if isinstance(markets, dict):
-                    if 'data' in markets:
-                        markets = markets['data']
-                    elif 'markets' in markets:
-                        markets = markets['markets']
-                
-                if not isinstance(markets, list):
-                    logger.error(f"Expected list of markets, got {type(markets)}")
-                    return
-                
-                # Sort by volume if configured
-                if sort_by_volume:
-                    try:
-                        markets.sort(key=lambda m: float(m.get('volume24hr', 0)), reverse=True)
-                    except (ValueError, TypeError):
-                        logger.warning("Could not sort markets by volume")
-                
-                # Filter and update monitored markets
-                new_market_ids = []
-                updated_markets = {}
-                websocket_token_ids = []
-                
-                for market in markets:
-                    try:
-                        condition_id = market.get('conditionId', '')
-                        volume = float(market.get('volume24hr', 0))
-                        
-                        if condition_id and volume >= volume_threshold:
-                            new_market_ids.append(condition_id)
-                            updated_markets[condition_id] = market
-                            
-                            # Collect token IDs for WebSocket subscription and outcome mapping
-                            token_ids_raw = market.get('clobTokenIds', [])
-                            if token_ids_raw:
-                                try:
-                                    # Parse JSON string if needed
-                                    if isinstance(token_ids_raw, str):
-                                        token_ids = json.loads(token_ids_raw)
-                                    else:
-                                        token_ids = token_ids_raw
-                                    
-                                    if isinstance(token_ids, list):
-                                        websocket_token_ids.extend(token_ids[:2])  # Take first 2 from each market
-                                        
-                                        # Map token IDs to outcomes (assuming first token is "Yes", second is "No")
-                                        if len(token_ids) >= 2:
-                                            self.token_to_outcome[token_ids[0]] = "Yes"
-                                            self.token_to_outcome[token_ids[1]] = "No"
-                                except (json.JSONDecodeError, TypeError) as e:
-                                    logger.debug(f"Could not parse token IDs for {condition_id}: {e}")
-                            
-                            # Initialize baseline if new market
-                            if condition_id not in self.monitored_markets:
-                                await self._initialize_market_baseline(condition_id, market)
-                    
-                    except (KeyError, ValueError, TypeError) as e:
-                        continue
-                
-                # Update monitored markets
-                old_count = len(self.monitored_markets)
-                self.monitored_markets = updated_markets
-                new_count = len(self.monitored_markets)
-                
-                logger.info(f"📊 Monitoring {new_count} markets (was {old_count})")
-                
-                # Update WebSocket subscriptions (optional - fallback to Data API if fails)
-                try:
-                    await self._update_websocket_subscriptions(websocket_token_ids)
-                    logger.info(f"🔌 WebSocket subscriptions updated with {len(websocket_token_ids)} token IDs")
-                except Exception as e:
-                    logger.warning(f"WebSocket subscription failed, using Data API only: {e}")
+
+        gamma_api = "https://gamma-api.polymarket.com"
+        volume_threshold = self.config.get('monitoring', {}).get('volume_threshold', 1000)
+        max_markets = self.config.get('monitoring', {}).get('max_markets', 50)
+        sort_by_volume = self.config.get('monitoring', {}).get('sort_by_volume', True)
+
+        try:
+            # Use persistent session if available, otherwise create temporary (for tests)
+            import aiohttp
+            if self.gamma_session:
+                session = self.gamma_session
+                async with session.get(f"{gamma_api}/markets?active=true&closed=false&limit={max_markets}") as resp:
+                    await self._process_markets_response(resp, volume_threshold, max_markets, sort_by_volume)
+            else:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{gamma_api}/markets?active=true&closed=false&limit={max_markets}") as resp:
+                        await self._process_markets_response(resp, volume_threshold, max_markets, sort_by_volume)
+        except Exception as e:
+            logger.error(f"Error discovering markets: {e}", exc_info=True)
+
+    async def _process_markets_response(self, resp, volume_threshold, max_markets, sort_by_volume):
+        """Process the markets API response"""
+        if resp.status != 200:
+            logger.error(f"Failed to fetch markets: HTTP {resp.status}")
+            return
+
+        markets = await resp.json()
+
+        # Handle different response formats
+        if isinstance(markets, dict):
+            if 'data' in markets:
+                markets = markets['data']
+            elif 'markets' in markets:
+                markets = markets['markets']
+
+        if not isinstance(markets, list):
+            logger.error(f"Expected list of markets, got {type(markets)}")
+            return
+
+        # Sort by volume if configured
+        if sort_by_volume:
+            try:
+                markets.sort(key=lambda m: float(m.get('volume24hr', 0)), reverse=True)
+            except (ValueError, TypeError):
+                logger.warning("Could not sort markets by volume")
+
+        # Filter and update monitored markets
+        new_market_ids = []
+        updated_markets = {}
+        websocket_token_ids = []
+
+        for market in markets:
+            try:
+                condition_id = market.get('conditionId', '')
+                volume = float(market.get('volume24hr', 0))
+
+                if condition_id and volume >= volume_threshold:
+                    new_market_ids.append(condition_id)
+                    updated_markets[condition_id] = market
+
+                    # Collect token IDs for WebSocket subscription and outcome mapping
+                    token_ids_raw = market.get('clobTokenIds', [])
+                    if token_ids_raw:
+                        try:
+                            # Parse JSON string if needed
+                            if isinstance(token_ids_raw, str):
+                                token_ids = json.loads(token_ids_raw)
+                            else:
+                                token_ids = token_ids_raw
+
+                            if isinstance(token_ids, list):
+                                websocket_token_ids.extend(token_ids[:2])  # Take first 2 from each market
+
+                                # Map token IDs to outcomes (assuming first token is "Yes", second is "No")
+                                if len(token_ids) >= 2:
+                                    self.token_to_outcome[token_ids[0]] = "Yes"
+                                    self.token_to_outcome[token_ids[1]] = "No"
+                        except (json.JSONDecodeError, TypeError) as e:
+                            logger.debug(f"Could not parse token IDs for {condition_id}: {e}")
+
+                    # Initialize baseline if new market
+                    if condition_id not in self.monitored_markets:
+                        await self._initialize_market_baseline(condition_id, market)
+
+            except (KeyError, ValueError, TypeError) as e:
+                continue
+
+        # Update monitored markets
+        old_count = len(self.monitored_markets)
+        self.monitored_markets = updated_markets
+        new_count = len(self.monitored_markets)
+
+        logger.info(f"📊 Monitoring {new_count} markets (was {old_count})")
+
+        # Update WebSocket subscriptions (optional - fallback to Data API if fails)
+        try:
+            await self._update_websocket_subscriptions(websocket_token_ids)
+            logger.info(f"🔌 WebSocket subscriptions updated with {len(websocket_token_ids)} token IDs")
+        except Exception as e:
+            logger.warning(f"WebSocket subscription failed, using Data API only: {e}")
     
     async def _initialize_market_baseline(self, market_id: str, market_data: Dict):
         """Initialize baseline metrics for a new market"""
         try:
             # Get extended historical data for better baselines
-            historical_trades = self.data_api.get_historical_trades(market_id, lookback_hours=TimeConstants.HISTORICAL_DATA_HOURS)
+            historical_trades = await self.data_api.get_historical_trades(market_id, lookback_hours=TimeConstants.HISTORICAL_DATA_HOURS)
             
             if historical_trades:
                 # Calculate baseline using volume detector
@@ -393,8 +426,11 @@ class MarketMonitor:
                     self.websocket_client = None  # Disable WebSocket
             else:
                 consecutive_failures = 0  # Reset on successful connection
-            
+
             await asyncio.sleep(30)  # Check every 30 seconds
+
+        # Log if loop exits
+        logger.error(f"❌ CRITICAL: websocket_monitor loop exited! self.running={self.running}")
     
     async def _status_reporter(self):
         """Periodically report system status and activity"""
@@ -403,16 +439,19 @@ class MarketMonitor:
                 if self.debug_mode or self.show_normal_activity:
                     now = datetime.now(timezone.utc)
                     time_since_last = (now - self.last_status_report).total_seconds()
-                    
+
                     if time_since_last >= self.status_report_interval:
                         await self._generate_status_report()
                         self.last_status_report = now
-                
+
                 await asyncio.sleep(60)  # Check every minute
-                
+
             except Exception as e:
                 logger.error(f"Error in status reporter: {e}")
                 await asyncio.sleep(60)
+
+        # Log if loop exits
+        logger.error(f"❌ CRITICAL: status_reporter loop exited! self.running={self.running}")
     
     async def _generate_status_report(self):
         """Generate comprehensive status report"""
@@ -478,7 +517,7 @@ class MarketMonitor:
         print(format_line(f"{Fore.CYAN}History:{Style.RESET_ALL} {total_trades_stored} trades across {len(self.trade_history)} markets"))
         
         # Data API status
-        api_operational = self.data_api.test_connection()
+        api_operational = await self.data_api.test_connection()
         api_status_color = Fore.GREEN if api_operational else Fore.RED
         api_status_text = "Operational" if api_operational else "Failed"
         print(format_line(f"{Fore.CYAN}Data API:{Style.RESET_ALL} {api_status_color}{api_status_text}{Style.RESET_ALL}"))
@@ -527,10 +566,10 @@ class MarketMonitor:
         last_poll_time = datetime.now(timezone.utc)
         trades_detected_this_period = 0
         poll_count = 0
-        
+
         if self.debug_mode:
             print(f"{Fore.CYAN}🔄 {Style.BRIGHT}TRADE POLLING STARTED{Style.RESET_ALL}")
-        
+
         while self.running:
             try:
                 if not self.monitored_markets:
@@ -538,30 +577,30 @@ class MarketMonitor:
                         logger.info("⏳ Trade polling waiting for markets to be discovered...")
                     await asyncio.sleep(30)
                     continue
-                
+
                 # Get market IDs to poll (try all markets first, then limit if needed)
                 all_market_ids = list(self.monitored_markets.keys())
                 market_ids = all_market_ids  # Start with all markets for better coverage
-                
+
                 # Get recent trades from last poll
                 current_time = datetime.now(timezone.utc)
                 time_since_last = (current_time - last_poll_time).total_seconds()
-                
+
                 if time_since_last >= 15:  # Poll every 15 seconds
                     poll_count += 1
                     try:
                         # Get recent trades - only for monitored markets (increased limit for better data quality)
                         recent_trades = self.data_api.get_recent_trades(market_ids, limit=500)
-                        
+
                         # Filter for trades newer than last poll
                         new_trades = []
                         cutoff_timestamp = last_poll_time.timestamp()
-                        
+
                         for trade in recent_trades:
                             trade_timestamp = trade.get('timestamp', 0)
                             if trade_timestamp > cutoff_timestamp:
                                 new_trades.append(trade)
-                        
+
                         if self.debug_mode:
                             newest_info = ""
                             if new_trades:
@@ -575,11 +614,11 @@ class MarketMonitor:
                                 price = newest_trade.get('price', 0)
                                 newest_info = f", newest: {side} {outcome} ${size:.0f} @ {price:.3f}"
                             logger.info(f"🔄 Poll #{poll_count}: {len(market_ids)} markets, {len(recent_trades)} API trades, {len(new_trades)} new{newest_info}")
-                        
+
                         # Only show this if we actually found new trades
                         if new_trades and not self.debug_mode:
                             print(f"🔄 TRADE POLLING: Found {len(new_trades)} new trades")
-                        
+
                         # Process new trades
                         for trade in new_trades:
                             # Normalize trade data to match WebSocket format
@@ -595,28 +634,31 @@ class MarketMonitor:
                                 'tx_hash': trade.get('transactionHash'),
                                 'source': 'data_api'
                             }
-                            
-                            
+
+
                             # Process the trade as if it came from WebSocket
                             self._handle_realtime_trade(normalized_trade)
                             trades_detected_this_period += 1
-                        
+
                         if new_trades and (self.debug_mode or self.show_normal_activity):
                             print(f"{Fore.GREEN}🔄 {Style.BRIGHT}TRADE POLLING:{Style.RESET_ALL} Found {len(new_trades)} new trades")
-                        
+
                         last_poll_time = current_time
-                        
+
                     except Exception as e:
                         logger.error(f"Error in trade polling: {e}")
                         if self.debug_mode:
                             import traceback
                             logger.error(f"Trade polling traceback: {traceback.format_exc()}")
-                
+
                 await asyncio.sleep(5)  # Check every 5 seconds, poll every 15
-                
+
             except Exception as e:
                 logger.error(f"Error in trade polling loop: {e}")
                 await asyncio.sleep(30)
+
+        # Log if loop exits
+        logger.error(f"❌ CRITICAL: trade_polling_loop exited! self.running={self.running}")
     
     async def _analysis_loop(self):
         """Main analysis loop - runs detection algorithms"""
@@ -627,6 +669,9 @@ class MarketMonitor:
             except Exception as e:
                 logger.error(f"Error in analysis loop: {e}")
                 await asyncio.sleep(30)
+
+        # Log if loop exits
+        logger.error(f"❌ CRITICAL: analysis_loop exited! self.running={self.running}")
     
     async def _run_market_analysis(self):
         """Run analysis on all monitored markets"""
@@ -1172,3 +1217,6 @@ class MarketMonitor:
             except Exception as e:
                 logger.error(f"Error in outcome update loop: {e}", exc_info=True)
                 await asyncio.sleep(300)  # Wait 5 minutes before retrying
+
+        # Log if loop exits
+        logger.error(f"❌ CRITICAL: outcome_update_loop exited! self.running={self.running}")

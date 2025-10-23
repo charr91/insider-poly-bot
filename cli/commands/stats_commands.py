@@ -39,23 +39,24 @@ async def _performance_stats_async(db_path, days):
     db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
     await db_manager.init_db()
 
-    data_api = DataAPIClient()
-    outcome_tracker = OutcomeTracker(db_manager, data_api)
+    # Use async context manager for DataAPIClient
+    async with DataAPIClient() as data_api:
+        outcome_tracker = OutcomeTracker(db_manager, data_api)
 
-    stats = await outcome_tracker.get_performance_stats(days=days)
+        stats = await outcome_tracker.get_performance_stats(days=days)
 
-    if not stats or stats.get('total_alerts', 0) == 0:
-        console.print(f"[yellow]No alert outcome data available for the last {days} days[/yellow]")
-        return
+        if not stats or stats.get('total_alerts', 0) == 0:
+            console.print(f"[yellow]No alert outcome data available for the last {days} days[/yellow]")
+            return
 
-    # Create performance panel
-    total = stats.get('total_alerts', 0)
-    profitable = stats.get('profitable_count', 0)
-    unprofitable = stats.get('unprofitable_count', 0)
-    win_rate = stats.get('win_rate', 0)
-    avg_profit = stats.get('avg_profit_pct', 0)
+        # Create performance panel
+        total = stats.get('total_alerts', 0)
+        profitable = stats.get('profitable_count', 0)
+        unprofitable = stats.get('unprofitable_count', 0)
+        win_rate = stats.get('win_rate', 0)
+        avg_profit = stats.get('avg_profit_pct', 0)
 
-    info = f"""
+        info = f"""
 [cyan]Period:[/cyan] Last {days} days
 
 [bold]Alert Outcomes:[/bold]
@@ -66,35 +67,35 @@ async def _performance_stats_async(db_path, days):
 [bold]Profitability Metrics:[/bold]
   Win Rate: {win_rate:.1f}%
   Avg Profit: {avg_profit:+.2f}%
-    """
+        """
 
-    # Determine border color based on win rate
-    if win_rate >= 60:
-        border_color = "green"
-        status = "✅ Excellent"
-    elif win_rate >= 50:
-        border_color = "yellow"
-        status = "⚠️  Good"
-    else:
-        border_color = "red"
-        status = "❌ Needs Improvement"
+        # Determine border color based on win rate
+        if win_rate >= 60:
+            border_color = "green"
+            status = "✅ Excellent"
+        elif win_rate >= 50:
+            border_color = "yellow"
+            status = "⚠️  Good"
+        else:
+            border_color = "red"
+            status = "❌ Needs Improvement"
 
-    info += f"\n[bold]Overall Status:[/bold] {status}"
+        info += f"\n[bold]Overall Status:[/bold] {status}"
 
-    panel = Panel(
-        info.strip(),
-        title=f"📊 Alert Performance ({days}d)",
-        border_style=border_color
-    )
+        panel = Panel(
+            info.strip(),
+            title=f"📊 Alert Performance ({days}d)",
+            border_style=border_color
+        )
 
-    console.print(panel)
+        console.print(panel)
 
-    # Show breakdown by alert type if available
-    if 'by_alert_type' in stats:
-        console.print("\n[bold]Performance by Alert Type:[/bold]")
-        for alert_type, type_stats in stats['by_alert_type'].items():
-            type_win_rate = type_stats.get('win_rate', 0)
-            console.print(f"  {alert_type}: {type_win_rate:.1f}% win rate ({type_stats.get('count', 0)} alerts)")
+        # Show breakdown by alert type if available
+        if 'by_alert_type' in stats:
+            console.print("\n[bold]Performance by Alert Type:[/bold]")
+            for alert_type, type_stats in stats['by_alert_type'].items():
+                type_win_rate = type_stats.get('win_rate', 0)
+                console.print(f"  {alert_type}: {type_win_rate:.1f}% win rate ({type_stats.get('count', 0)} alerts)")
 
 
 @stats.command('summary')

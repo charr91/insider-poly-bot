@@ -317,7 +317,7 @@ class TestStatusReporting:
         monitor.websocket_client = mock_ws_client
         
         # Mock data API
-        monitor.data_api.test_connection = Mock(return_value=True)
+        monitor.data_api.test_connection = AsyncMock(return_value=True)
         
         # Capture print output
         with patch('builtins.print') as mock_print:
@@ -386,16 +386,14 @@ class TestErrorHandling:
         mock_load_config.return_value = mock_config
         
         monitor = MarketMonitor('test_config.json')
-        
+
         # Mock an exception during discovery
         with patch('aiohttp.ClientSession') as mock_session:
             mock_session.side_effect = Exception("Network error")
-            
-            # Should not raise exception - it should handle the error gracefully
-            # The current implementation lets exceptions bubble up, so we catch them here
-            with pytest.raises(Exception, match="Network error"):
-                await monitor._discover_markets()
-            
+
+            # Should handle the error gracefully without raising
+            await monitor._discover_markets()
+
             # Markets should remain empty
             assert len(monitor.monitored_markets) == 0
     

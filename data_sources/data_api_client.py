@@ -1,85 +1,167 @@
 """
 Polymarket Data API Client
 Fetches historical and current trade data from public API
+
+This client uses async aiohttp for optimal performance in async contexts
+and proper resource management to prevent memory leaks.
 """
 
-import requests
+import aiohttp
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
-import time
 
 logger = logging.getLogger(__name__)
 
 class DataAPIClient:
-    """Client for Polymarket Data API - provides historical trade data"""
-    
+    """
+    Async client for Polymarket Data API - provides historical trade data.
+
+    Designed for use as an async context manager to ensure proper cleanup:
+        async with DataAPIClient() as client:
+            trades = await client.get_market_trades(market_id)
+
+    Or with manual lifecycle management:
+        client = DataAPIClient()
+        await client.__aenter__()
+        try:
+            trades = await client.get_market_trades(market_id)
+        finally:
+            await client.__aexit__(None, None, None)
+    """
+
     def __init__(self, base_url: str = "https://data-api.polymarket.com"):
         self.base_url = base_url.rstrip('/')
         self.trades_endpoint = f"{self.base_url}/trades"
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'PolymarketInsiderBot/1.0',
-            'Accept': 'application/json'
-        })
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._owned_session = False  # Track if we created the session
+
+    async def __aenter__(self):
+        """Async context manager entry - creates session"""
+        await self._ensure_session()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - closes session"""
+        await self.close()
+        return False
+
+    async def _ensure_session(self):
+        """Create session if it doesn't exist"""
+        if self._session is None or self._session.closed:
+            # Configure timeout for all requests
+            timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=10)
+
+            # Create session with proper headers
+            self._session = aiohttp.ClientSession(
+                headers={
+                    'User-Agent': 'PolymarketInsiderBot/1.0',
+                    'Accept': 'application/json'
+                },
+                timeout=timeout,
+                connector=aiohttp.TCPConnector(
+                    limit=10,  # Connection pool limit
+                    limit_per_host=5,  # Per-host connection limit
+                    ttl_dns_cache=300  # DNS cache TTL
+                )
+            )
+            self._owned_session = True
+            logger.debug("DataAPIClient session created")
         
-    def get_market_trades(self, market_id: str, limit: int = 100, offset: int = 0) -> List[Dict]:
-        """Get trades for a specific market"""
+    async def get_market_trades(self, market_id: str, limit: int = 100, offset: int = 0) -> List[Dict]:
+        """
+        Get trades for a specific market.
+
+        Args:
+            market_id: Market condition ID
+            limit: Maximum number of trades to return (capped at 500)
+            offset: Pagination offset
+
+        Returns:
+            List of trade dictionaries
+        """
+        await self._ensure_session()
+
         params = {
             'market': market_id,
             'limit': min(limit, 500),  # API max is 500
             'offset': offset
         }
-        
+
         try:
-            response = self.session.get(self.trades_endpoint, params=params, timeout=10)
-            response.raise_for_status()
-            
-            trades = response.json()
-            logger.debug(f"Fetched {len(trades)} trades for market {market_id[:10]}...")
-            return trades
-            
-        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+            async with self._session.get(self.trades_endpoint, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                trades = await response.json()
+                logger.debug(f"Fetched {len(trades)} trades for market {market_id[:10]}...")
+                return trades
+
+        except aiohttp.ClientError as e:
             logger.error(f"Error fetching trades for market {market_id[:10]}...: {e}")
             return []
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Error parsing JSON for market {market_id[:10]}...: {e}")
+            return []
     
-    def get_recent_trades(self, market_ids: List[str], limit: int = 100) -> List[Dict]:
-        """Get recent trades across multiple markets"""
+    async def get_recent_trades(self, market_ids: List[str], limit: int = 100) -> List[Dict]:
+        """
+        Get recent trades across multiple markets.
+
+        Args:
+            market_ids: List of market condition IDs to filter by (empty = all markets)
+            limit: Maximum number of trades to return (capped at 500)
+
+        Returns:
+            List of trade dictionaries
+        """
+        await self._ensure_session()
+
         params = {
             'limit': min(limit, 500)
         }
-        
+
         # Only add market filter if market_ids provided
         if market_ids:
             market_param = ",".join(market_ids)
             params['market'] = market_param
-        
+
         try:
-            response = self.session.get(self.trades_endpoint, params=params, timeout=10)
-            response.raise_for_status()
-            
-            trades = response.json()
-            market_info = f" across {len(market_ids)} markets" if market_ids else " (all markets)"
-            logger.debug(f"Fetched {len(trades)} recent trades{market_info}")
-            return trades
-            
-        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+            async with self._session.get(self.trades_endpoint, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                trades = await response.json()
+                market_info = f" across {len(market_ids)} markets" if market_ids else " (all markets)"
+                logger.debug(f"Fetched {len(trades)} recent trades{market_info}")
+                return trades
+
+        except aiohttp.ClientError as e:
             logger.error(f"Error fetching recent trades: {e}")
             return []
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Error parsing JSON for recent trades: {e}")
+            return []
     
-    def get_historical_trades(self, market_id: str, lookback_hours: int = 24) -> List[Dict]:
-        """Get historical trades within a time window for baseline analysis"""
+    async def get_historical_trades(self, market_id: str, lookback_hours: int = 24) -> List[Dict]:
+        """
+        Get historical trades within a time window for baseline analysis.
+
+        Args:
+            market_id: Market condition ID
+            lookback_hours: How many hours back to fetch data
+
+        Returns:
+            List of trade dictionaries within the time window
+        """
         all_trades = []
         offset = 0
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-        
+
         while True:
-            trades = self.get_market_trades(market_id, limit=500, offset=offset)
-            
+            trades = await self.get_market_trades(market_id, limit=500, offset=offset)
+
             if not trades:
                 break
-            
+
             # Filter by timestamp and add to results
             time_filtered = []
             for trade in trades:
@@ -92,7 +174,7 @@ class DataAPIClient:
                         else:
                             # ISO format
                             trade_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                        
+
                         if trade_time > cutoff_time:
                             time_filtered.append(trade)
                         else:
@@ -102,43 +184,69 @@ class DataAPIClient:
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Error parsing timestamp for trade: {e}")
                     continue
-            
+
             all_trades.extend(time_filtered)
-            
+
             # If we got fewer than requested, we've hit the end
             if len(trades) < 500:
                 break
-                
+
             offset += 500
-            
-            # Rate limiting
-            time.sleep(0.1)
-        
+
+            # Rate limiting - use asyncio.sleep instead of time.sleep
+            await asyncio.sleep(0.1)
+
         logger.info(f"Fetched {len(all_trades)} historical trades for {market_id[:10]}... (last {lookback_hours}h)")
         return all_trades
     
-    def get_all_recent_trades(self, limit: int = 100) -> List[Dict]:
-        """Get recent trades across all markets (no market filter)"""
+    async def get_all_recent_trades(self, limit: int = 100) -> List[Dict]:
+        """
+        Get recent trades across all markets (no market filter).
+
+        Args:
+            limit: Maximum number of trades to return (capped at 500)
+
+        Returns:
+            List of trade dictionaries
+        """
+        await self._ensure_session()
+
         params = {'limit': min(limit, 500)}
-        
+
         try:
-            response = self.session.get(self.trades_endpoint, params=params, timeout=10)
-            response.raise_for_status()
-            
-            trades = response.json()
-            logger.debug(f"Fetched {len(trades)} recent trades across all markets")
-            return trades
-            
-        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+            async with self._session.get(self.trades_endpoint, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                response.raise_for_status()
+                trades = await response.json()
+                logger.debug(f"Fetched {len(trades)} recent trades across all markets")
+                return trades
+
+        except aiohttp.ClientError as e:
             logger.error(f"Error fetching all recent trades: {e}")
             return []
-    
-    def test_connection(self) -> bool:
-        """Test API connectivity"""
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Error parsing JSON for all recent trades: {e}")
+            return []
+
+    async def test_connection(self) -> bool:
+        """
+        Test API connectivity.
+
+        Returns:
+            True if connection successful, False otherwise
+        """
+        await self._ensure_session()
+
         try:
-            response = self.session.get(self.trades_endpoint, params={'limit': 1}, timeout=5)
-            response.raise_for_status()
-            return True
+            async with self._session.get(self.trades_endpoint, params={'limit': 1}, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                response.raise_for_status()
+                return True
         except Exception as e:
             logger.error(f"Data API connection test failed: {e}")
             return False
+
+    async def close(self):
+        """Close the session and clean up resources"""
+        if self._session and not self._session.closed and self._owned_session:
+            await self._session.close()
+            logger.debug("DataAPIClient session closed")
+            self._session = None
