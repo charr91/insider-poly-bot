@@ -15,7 +15,8 @@ class AlertType(Enum):
     WHALE_ACTIVITY = "WHALE_ACTIVITY"
     UNUSUAL_PRICE_MOVEMENT = "UNUSUAL_PRICE_MOVEMENT"
     COORDINATED_TRADING = "COORDINATED_TRADING"
-    
+    FRESH_WALLET_LARGE_BET = "FRESH_WALLET_LARGE_BET"
+
     def __str__(self) -> str:
         return self.value
 
@@ -255,6 +256,14 @@ class CoordinationConstants:
     DEFAULT_COORDINATION_TIME_WINDOW = 30
     DEFAULT_DIRECTIONAL_BIAS_THRESHOLD = 0.8
     DEFAULT_BURST_INTENSITY_THRESHOLD = 3.0
+
+
+class FreshWalletConstants:
+    """Fresh wallet detection constants"""
+    DEFAULT_MIN_BET_SIZE_USD = 2000
+    DEFAULT_API_LOOKBACK_LIMIT = 100
+    DEFAULT_MAX_PREVIOUS_TRADES = 0
+    WALLET_HISTORY_CACHE_TTL_HOURS = 24  # Cache verification results
 
 
 class MarketMakerThresholds:

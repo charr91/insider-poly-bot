@@ -201,6 +201,10 @@ class WhaleAddress(Base):
     is_market_maker: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     market_maker_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 0-100
 
+    # Fresh wallet tracking
+    is_fresh_wallet: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    verified_fresh: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # API verification completed
+
     # Flexible data storage
     tags_json: Mapped[List[str]] = mapped_column(JSON, nullable=False, default=list)  # ["coordination", "volume_spike", etc.]
     metrics_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)  # avg_trade_size, coordination_score, etc.

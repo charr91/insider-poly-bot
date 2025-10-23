@@ -20,7 +20,7 @@
       "z_score_threshold": 3.0
     },
     "whale_thresholds": {
-      "whale_threshold_usd": 10000,
+      "whale_threshold_usd": 2000,
       "coordination_threshold": 0.7,
       "min_whales_for_coordination": 3
     },
@@ -35,6 +35,11 @@
       "coordination_time_window": 30,
       "directional_bias_threshold": 0.8,
       "burst_intensity_threshold": 3.0
+    },
+    "fresh_wallet_thresholds": {
+      "min_bet_size_usd": 2000,
+      "api_lookback_limit": 100,
+      "max_previous_trades": 0
     }
   },
   "alerts": {

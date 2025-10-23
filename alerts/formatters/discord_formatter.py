@@ -211,6 +211,10 @@ class DiscordFormatter:
             lines.append(f"**Coordination:** {coord_score:.2f} score")
             lines.append(f"**Wallets:** {unique_wallets} coordinated")
 
+        elif alert_type_str == 'FRESH_WALLET_LARGE_BET':
+            # No aggregate stats needed - all details go in trade details section
+            pass
+
         # Add timestamp
         alert_time = alert.get('timestamp')
         if isinstance(alert_time, datetime):
@@ -226,7 +230,12 @@ class DiscordFormatter:
         return "\n".join(lines)
 
     def _format_trade_details(self, analysis: Dict) -> Optional[str]:
-        """Format trade details for whale/coordination alerts"""
+        """Format trade details for whale/coordination/fresh wallet alerts"""
+        # Check if this is a fresh wallet alert (has wallet_address field)
+        if 'wallet_address' in analysis:
+            return self._format_fresh_wallet_details(analysis)
+
+        # Otherwise handle whale alerts
         whale_breakdown = analysis.get('whale_breakdown', {})
 
         if not whale_breakdown:
@@ -266,6 +275,37 @@ class DiscordFormatter:
         if top_whale.get('tx_hash') and top_whale['tx_hash'] != 'unknown':
             tx_short = f"{top_whale['tx_hash'][:6]}...{top_whale['tx_hash'][-4:]}"
             tx_url = f"https://polygonscan.com/tx/{top_whale['tx_hash']}"
+            lines.append(f"**Tx:** [{tx_short}]({tx_url})")
+
+        return "\n".join(lines)
+
+    def _format_fresh_wallet_details(self, wallet_data: Dict) -> str:
+        """Format trade details for fresh wallet alert"""
+        bet_size = wallet_data.get('bet_size', 0)
+        side = wallet_data.get('side', 'UNKNOWN')
+        price = wallet_data.get('price', 0)
+        outcome = wallet_data.get('outcome', 'UNKNOWN')
+        wallet = wallet_data.get('wallet_address')
+        tx_hash = wallet_data.get('tx_hash')
+
+        # Format price with cents (reuse existing utility)
+        price_str = _format_single_price(price)
+
+        lines = [
+            f"**Bet Size:** ${bet_size/1000:.1f}K {side} {outcome} @ {price_str}",
+            f"**Fresh Wallet:** ✅ First trade on Polymarket"
+        ]
+
+        # Add wallet link
+        if wallet and wallet != 'unknown':
+            wallet_short = f"{wallet[:6]}...{wallet[-4:]}"
+            wallet_url = f"https://polygonscan.com/address/{wallet}"
+            lines.append(f"**Wallet:** [{wallet_short}]({wallet_url})")
+
+        # Add transaction link
+        if tx_hash and tx_hash != 'unknown':
+            tx_short = f"{tx_hash[:6]}...{tx_hash[-4:]}"
+            tx_url = f"https://polygonscan.com/tx/{tx_hash}"
             lines.append(f"**Tx:** [{tx_short}]({tx_url})")
 
         return "\n".join(lines)

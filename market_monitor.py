@@ -19,6 +19,7 @@ init(autoreset=True)
 from data_sources.data_api_client import DataAPIClient
 from data_sources.websocket_client import WebSocketClient
 from detection import VolumeDetector, WhaleDetector, PriceDetector, CoordinationDetector
+from detection.fresh_wallet_detector import FreshWalletDetector
 from alerts.alert_manager import AlertManager
 from config.settings import Settings
 from common import (
@@ -60,6 +61,7 @@ class MarketMonitor:
         self.whale_detector = WhaleDetector(self.config)
         self.price_detector = PriceDetector(self.config)
         self.coordination_detector = CoordinationDetector(self.config)
+        # Note: fresh_wallet_detector initialization deferred until after whale_tracker is created
 
         # Market data storage (must be initialized before AlertManager)
         self.monitored_markets = {}
@@ -71,6 +73,9 @@ class MarketMonitor:
         self.alert_storage = DatabaseAlertStorage(self.db_manager)
         self.whale_tracker = WhaleTracker(self.db_manager)
         self.outcome_tracker = OutcomeTracker(self.db_manager, self.data_api)
+
+        # Initialize fresh wallet detector (requires data_api and whale_tracker)
+        self.fresh_wallet_detector = FreshWalletDetector(self.config, self.data_api, self.whale_tracker)
 
         # Initialize alert manager with database storage and token mapping
         self.alert_manager = AlertManager(
@@ -139,6 +144,11 @@ class MarketMonitor:
                     "coordination_time_window": 30,
                     "directional_bias_threshold": 0.8,
                     "burst_intensity_threshold": 3.0
+                },
+                "fresh_wallet_thresholds": {
+                    "min_bet_size_usd": 2000,
+                    "api_lookback_limit": 100,
+                    "max_previous_trades": 0
                 }
             },
             "alerts": {
@@ -736,13 +746,16 @@ class MarketMonitor:
         
         # Whale detection
         whale_analysis = self.whale_detector.detect_whale_activity(trades)
-        
+
         # Price movement detection
         price_analysis = self.price_detector.detect_price_movement(trades)
-        
+
         # Coordination detection
         coordination_analysis = self.coordination_detector.detect_coordinated_buying(trades)
-        
+
+        # Fresh wallet detection - returns list of individual detections
+        fresh_wallet_detections = await self.fresh_wallet_detector.detect_fresh_wallet_activity(trades)
+
         # Multi-metric confidence evaluation
         detection_results = {
             AlertType.VOLUME_SPIKE: volume_analysis,
@@ -750,19 +763,28 @@ class MarketMonitor:
             AlertType.UNUSUAL_PRICE_MOVEMENT: price_analysis,
             AlertType.COORDINATED_TRADING: coordination_analysis
         }
-        
-        # Evaluate alerts with multi-metric confidence
+
+        # Evaluate alerts with multi-metric confidence (excluding fresh wallet for now)
         alerts = await self._evaluate_multi_metric_alerts(
             market_id, market_data, detection_results
         )
-        
+
+        # Handle fresh wallet detections separately (one alert per fresh wallet)
+        for fw_detection in fresh_wallet_detections:
+            # Create individual fresh wallet alert
+            fw_alert = await self._create_fresh_wallet_alert(
+                market_id, market_data, fw_detection
+            )
+            if fw_alert:
+                alerts.append(fw_alert)
+
         # Send alerts and count successful ones
         alerts_sent_successfully = 0
         for alert in alerts:
             if await self.alert_manager.send_alert(alert):
                 alerts_sent_successfully += 1
 
-                # Track whales for whale/coordination alerts
+                # Track whales for whale/coordination/fresh_wallet alerts
                 await self._track_whales_from_alert(alert, trades)
 
                 # Initialize outcome tracking for the alert
@@ -938,11 +960,30 @@ class MarketMonitor:
             # Base confidence on coordination score
             coord_score = analysis.get('coordination_score', 0)
             confidence += coord_score * 8.0  # Scale 0-1 to 0-8
-            
+
             # Bonus for wash trading detection
             if analysis.get('wash_trading_detected', False):
                 confidence += ConfidenceThresholds.WASH_TRADING_BONUS
-        
+
+        elif alert_type == AlertType.FRESH_WALLET_LARGE_BET:
+            # Fresh wallet is high-confidence insider signal
+            base_confidence = 7.0
+
+            bet_size = analysis.get('bet_size', 0)
+
+            # Bonus for large bet sizes
+            if bet_size >= 10000:
+                base_confidence += 1.5  # $10k+ bet
+            elif bet_size >= 5000:
+                base_confidence += 1.0  # $5k+ bet
+
+            # Bonus for truly first trade ever
+            previous_trades = analysis.get('previous_trade_count', 0)
+            if previous_trades == 0:
+                base_confidence += 1.0  # First-ever trade
+
+            confidence = base_confidence
+
         return min(confidence, ConfidenceThresholds.MAX_CONFIDENCE_SCORE)
     
     def _determine_severity(self, alert_type: AlertType, analysis: Dict) -> AlertSeverity:
@@ -955,6 +996,14 @@ class MarketMonitor:
             return AlertSeverity.CRITICAL if any(analysis.get('triggers', {}).values()) else AlertSeverity.MEDIUM
         elif alert_type == AlertType.COORDINATED_TRADING:
             return AlertSeverity.CRITICAL if analysis.get('coordination_score', 0) > 0.8 else AlertSeverity.HIGH
+        elif alert_type == AlertType.FRESH_WALLET_LARGE_BET:
+            bet_size = analysis.get('bet_size', 0)
+            if bet_size >= 10000:
+                return AlertSeverity.CRITICAL  # $10k+ first bet
+            elif bet_size >= 5000:
+                return AlertSeverity.HIGH  # $5k+ first bet
+            else:
+                return AlertSeverity.MEDIUM  # $2k+ first bet
         return AlertSeverity.MEDIUM
     
     def _record_market_activity(self, market_id: str, alert_type: AlertType, analysis: Dict, severity: AlertSeverity):
@@ -1031,7 +1080,48 @@ class MarketMonitor:
         
         # Allow the alert - not platform-wide activity
         return False, f"Isolated activity (only {markets_with_similar_alerts} similar markets)"
-    
+
+    async def _create_fresh_wallet_alert(self, market_id: str, market_data: Dict,
+                                         fw_detection: Dict) -> Optional[Dict]:
+        """
+        Create alert for a fresh wallet detection.
+
+        Args:
+            market_id: Market identifier
+            market_data: Market metadata
+            fw_detection: Fresh wallet detection dict with wallet details
+
+        Returns:
+            Alert dict or None if creation fails
+        """
+        try:
+            alert_type = AlertType.FRESH_WALLET_LARGE_BET
+
+            # Determine severity based on bet size
+            severity = self._determine_severity(alert_type, fw_detection)
+
+            # Calculate confidence score
+            confidence_score = self._calculate_anomaly_confidence(alert_type, fw_detection)
+
+            # Create alert using standard method
+            alert = await self._create_alert(
+                market_id,
+                market_data,
+                alert_type,
+                fw_detection,
+                severity.value
+            )
+
+            if alert:
+                alert['confidence_score'] = confidence_score
+                alert['multi_metric'] = False  # Fresh wallet alerts are standalone
+
+            return alert
+
+        except Exception as e:
+            logger.error(f"Failed to create fresh wallet alert: {e}")
+            return None
+
     async def _create_alert(self, market_id: str, market_data: Dict, alert_type,
                           analysis: Dict, severity: str) -> Dict:
         """Create an alert from detection results"""

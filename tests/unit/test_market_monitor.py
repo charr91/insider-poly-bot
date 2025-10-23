@@ -42,6 +42,11 @@ def mock_config():
                 'coordination_time_window': 30,
                 'directional_bias_threshold': 0.8,
                 'burst_intensity_threshold': 3.0
+            },
+            'fresh_wallet_thresholds': {
+                'min_bet_size_usd': 2000,
+                'api_lookback_limit': 100,
+                'max_previous_trades': 0
             }
         },
         'alerts': {

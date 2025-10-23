@@ -250,6 +250,44 @@ class DataAPIClient:
             logger.error(f"Data API connection test failed: {e}")
             return False
 
+    async def get_wallet_trades(self, wallet_address: str, limit: int = 100) -> List[Dict]:
+        """
+        Get trade history for a specific wallet address.
+
+        Used to verify if wallet is fresh/first-time trader.
+
+        Args:
+            wallet_address: Wallet address to check
+            limit: Maximum trades to fetch (default: 100)
+
+        Returns:
+            List of trade dictionaries for this wallet
+        """
+        await self._ensure_session()
+
+        params = {
+            'maker': wallet_address,
+            'limit': min(limit, 500)
+        }
+
+        try:
+            async with self._session.get(
+                self.trades_endpoint,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                response.raise_for_status()
+                trades = await response.json()
+                logger.debug(f"Fetched {len(trades)} historical trades for wallet {wallet_address[:10]}...")
+                return trades
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Error fetching trades for wallet {wallet_address[:10]}...: {e}")
+            return []
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Error parsing JSON for wallet {wallet_address[:10]}...: {e}")
+            return []
+
     async def close(self):
         """Close the session and clean up resources"""
         if self._session and not self._session.closed and self._owned_session:

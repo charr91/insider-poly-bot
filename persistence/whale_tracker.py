@@ -437,3 +437,48 @@ class WhaleTracker:
         except Exception as e:
             self._logger.error(f"Failed to add tags to whale {address}: {e}")
             return False
+
+    async def get_whale(self, address: str):
+        """
+        Get whale object by address (used for fresh wallet detection).
+
+        Args:
+            address: Wallet address
+
+        Returns:
+            Whale ORM object or None if not found
+        """
+        try:
+            async with self.db_manager.session() as session:
+                whale_repo = WhaleRepository(session)
+                whale = await whale_repo.get_by_address(address)
+                return whale
+
+        except Exception as e:
+            self._logger.error(f"Failed to get whale {address}: {e}")
+            return None
+
+    async def mark_wallet_verified(self, address: str, is_fresh: bool, trade_count: int) -> None:
+        """
+        Mark a wallet as verified for freshness.
+
+        Args:
+            address: Wallet address
+            is_fresh: Whether wallet was determined to be fresh
+            trade_count: Number of previous trades found
+        """
+        try:
+            async with self.db_manager.session() as session:
+                whale_repo = WhaleRepository(session)
+                whale = await whale_repo.get_by_address(address)
+
+                if whale:
+                    whale.is_fresh_wallet = is_fresh
+                    whale.verified_fresh = True
+                    # Update trade count if this is first time we're seeing this wallet
+                    if whale.trade_count == 0:
+                        whale.trade_count = trade_count
+                    self._logger.debug(f"Marked wallet {address[:10]}... as verified (fresh={is_fresh}, trade_count={trade_count})")
+
+        except Exception as e:
+            self._logger.error(f"Failed to mark wallet {address} as verified: {e}")
