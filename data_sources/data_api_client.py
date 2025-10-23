@@ -141,22 +141,28 @@ class DataAPIClient:
             logger.error(f"Error parsing JSON for recent trades: {e}")
             return []
     
-    async def get_historical_trades(self, market_id: str, lookback_hours: int = 24) -> List[Dict]:
+    async def get_historical_trades(self, market_id: str, lookback_hours: int = 24, max_trades: int = 5000) -> List[Dict]:
         """
         Get historical trades within a time window for baseline analysis.
 
         Args:
             market_id: Market condition ID
             lookback_hours: How many hours back to fetch data
+            max_trades: Maximum number of trades to fetch (default 5000 to prevent memory issues)
 
         Returns:
-            List of trade dictionaries within the time window
+            List of trade dictionaries within the time window (up to max_trades)
         """
         all_trades = []
         offset = 0
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         while True:
+            # Stop if we've reached the max trades limit
+            if len(all_trades) >= max_trades:
+                logger.info(f"Reached max_trades limit ({max_trades}) for market {market_id[:10]}...")
+                break
+
             trades = await self.get_market_trades(market_id, limit=500, offset=offset)
 
             if not trades:

@@ -5,6 +5,7 @@ Coordinates data sources and detection algorithms for insider trading detection
 
 import asyncio
 import logging
+import tracemalloc
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 import json
@@ -521,7 +522,22 @@ class MarketMonitor:
         api_status_color = Fore.GREEN if api_operational else Fore.RED
         api_status_text = "Operational" if api_operational else "Failed"
         print(format_line(f"{Fore.CYAN}Data API:{Style.RESET_ALL} {api_status_color}{api_status_text}{Style.RESET_ALL}"))
-        
+
+        # Memory profiling
+        if tracemalloc.is_tracing():
+            current, peak = tracemalloc.get_traced_memory()
+            print(format_line(f"{Fore.CYAN}Memory:{Style.RESET_ALL} {current / 1024 / 1024:.1f} MB current, {peak / 1024 / 1024:.1f} MB peak"))
+
+            # Log top 3 memory allocations with traceback
+            snapshot = tracemalloc.take_snapshot()
+            top_stats = snapshot.statistics('traceback')[:3]
+            logger.info("Top 3 memory allocations:")
+            for i, stat in enumerate(top_stats, 1):
+                logger.info(f"  #{i}: {stat}")
+                logger.info(f"      Traceback:")
+                for line in stat.traceback.format():
+                    logger.info(f"        {line}")
+
         print(f"{Fore.BLUE}└{'─' * 58}┘{Style.RESET_ALL}\n")
     
     def _handle_realtime_trade(self, trade_data: Dict):
