@@ -37,8 +37,9 @@ class TestDiscordIntegration:
         return Settings(config)
 
     @pytest.mark.asyncio
+    @patch('alerts.telegram_notifier.aiohttp.ClientSession')
     @patch('alerts.alert_manager.aiohttp.ClientSession')
-    async def test_discord_connection_test(self, mock_session, real_settings):
+    async def test_discord_connection_test(self, mock_alert_session, mock_telegram_session, real_settings):
         """Test Discord webhook connection (mocked HTTP to prevent spam)"""
 
         # Track all post calls
@@ -69,8 +70,9 @@ class TestDiscordIntegration:
         mock_session_obj.__aenter__ = AsyncMock(return_value=mock_session_obj)
         mock_session_obj.__aexit__ = AsyncMock(return_value=None)
 
-        # Make ClientSession() return the session object
-        mock_session.return_value = mock_session_obj
+        # Make both ClientSession() calls return the session object
+        mock_alert_session.return_value = mock_session_obj
+        mock_telegram_session.return_value = mock_session_obj
 
         am = AlertManager(real_settings)
 
@@ -95,8 +97,9 @@ class TestDiscordIntegration:
             assert discord_called, "Discord webhook should have been called"
     
     @pytest.mark.asyncio
+    @patch('alerts.telegram_notifier.aiohttp.ClientSession')
     @patch('alerts.alert_manager.aiohttp.ClientSession')
-    async def test_send_real_alert_to_discord(self, mock_session, real_settings):
+    async def test_send_real_alert_to_discord(self, mock_alert_session, mock_telegram_session, real_settings):
         """Test sending alert to Discord (mocked HTTP to prevent spam)"""
 
         # Track all post calls
@@ -127,8 +130,9 @@ class TestDiscordIntegration:
         mock_session_obj.__aenter__ = AsyncMock(return_value=mock_session_obj)
         mock_session_obj.__aexit__ = AsyncMock(return_value=None)
 
-        # Make ClientSession() return the session object
-        mock_session.return_value = mock_session_obj
+        # Make both ClientSession() calls return the session object
+        mock_alert_session.return_value = mock_session_obj
+        mock_telegram_session.return_value = mock_session_obj
 
         am = AlertManager(real_settings)
 
