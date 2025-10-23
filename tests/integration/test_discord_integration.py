@@ -37,16 +37,19 @@ class TestDiscordIntegration:
         return Settings(config)
 
     @pytest.mark.asyncio
-    @patch('aiohttp.ClientSession.post')
-    async def test_discord_connection_test(self, mock_post, real_settings):
+    @patch('alerts.alert_manager.aiohttp.ClientSession')
+    async def test_discord_connection_test(self, mock_session, real_settings):
         """Test Discord webhook connection (mocked HTTP to prevent spam)"""
 
-        # Create mock responses for both Discord and Telegram
-        def create_mock_response(url, **kwargs):
-            """Create appropriate mock response based on URL"""
-            mock_response = MagicMock()
+        # Track all post calls
+        post_calls = []
 
-            if 'discord.com' in url:
+        def create_mock_post(url, **kwargs):
+            """Create mock response based on URL"""
+            post_calls.append((url, kwargs))
+
+            mock_response = MagicMock()
+            if 'discord.com' in str(url):
                 # Discord webhook response
                 mock_response.status = 204
                 mock_response.text = AsyncMock(return_value='')
@@ -60,8 +63,14 @@ class TestDiscordIntegration:
             mock_response.__aexit__ = AsyncMock(return_value=None)
             return mock_response
 
-        # Use side_effect to return different responses based on URL
-        mock_post.side_effect = create_mock_response
+        # Mock session object
+        mock_session_obj = MagicMock()
+        mock_session_obj.post = MagicMock(side_effect=create_mock_post)
+        mock_session_obj.__aenter__ = AsyncMock(return_value=mock_session_obj)
+        mock_session_obj.__aexit__ = AsyncMock(return_value=None)
+
+        # Make ClientSession() return the session object
+        mock_session.return_value = mock_session_obj
 
         am = AlertManager(real_settings)
 
@@ -69,17 +78,16 @@ class TestDiscordIntegration:
         await am.test_connections()
 
         # Verify HTTP calls were made (should be at least one for Discord)
-        assert mock_post.call_count > 0
+        assert len(post_calls) > 0, "No HTTP POST calls were made"
 
         # Check that Discord was called
         discord_called = False
-        for call in mock_post.call_args_list:
-            call_args_str = str(call)
-            if 'discord.com' in call_args_str:
+        for url, kwargs in post_calls:
+            if 'discord.com' in str(url):
                 discord_called = True
                 # Verify payload structure (should have embeds)
-                if call[1].get('json'):
-                    assert 'embeds' in call[1]['json'], "Discord payload should have embeds"
+                if kwargs.get('json'):
+                    assert 'embeds' in kwargs['json'], "Discord payload should have embeds"
 
         # Verify Discord webhook was called
         webhook_url = os.getenv('DISCORD_WEBHOOK', '')
@@ -87,16 +95,19 @@ class TestDiscordIntegration:
             assert discord_called, "Discord webhook should have been called"
     
     @pytest.mark.asyncio
-    @patch('aiohttp.ClientSession.post')
-    async def test_send_real_alert_to_discord(self, mock_post, real_settings):
+    @patch('alerts.alert_manager.aiohttp.ClientSession')
+    async def test_send_real_alert_to_discord(self, mock_session, real_settings):
         """Test sending alert to Discord (mocked HTTP to prevent spam)"""
 
-        # Create mock responses for both Discord and Telegram
-        def create_mock_response(url, **kwargs):
-            """Create appropriate mock response based on URL"""
-            mock_response = MagicMock()
+        # Track all post calls
+        post_calls = []
 
-            if 'discord.com' in url:
+        def create_mock_post(url, **kwargs):
+            """Create mock response based on URL"""
+            post_calls.append((url, kwargs))
+
+            mock_response = MagicMock()
+            if 'discord.com' in str(url):
                 # Discord webhook response
                 mock_response.status = 204
                 mock_response.text = AsyncMock(return_value='')
@@ -110,8 +121,14 @@ class TestDiscordIntegration:
             mock_response.__aexit__ = AsyncMock(return_value=None)
             return mock_response
 
-        # Use side_effect to return different responses based on URL
-        mock_post.side_effect = create_mock_response
+        # Mock session object
+        mock_session_obj = MagicMock()
+        mock_session_obj.post = MagicMock(side_effect=create_mock_post)
+        mock_session_obj.__aenter__ = AsyncMock(return_value=mock_session_obj)
+        mock_session_obj.__aexit__ = AsyncMock(return_value=None)
+
+        # Make ClientSession() return the session object
+        mock_session.return_value = mock_session_obj
 
         am = AlertManager(real_settings)
 
@@ -137,7 +154,7 @@ class TestDiscordIntegration:
         await am.send_alert(test_alert)
 
         # Verify HTTP calls were made (both Discord and possibly Telegram)
-        assert mock_post.call_count > 0
+        assert len(post_calls) > 0, "No HTTP POST calls were made"
 
         # Verify alert was recorded
         assert len(am.alert_history) == 1
@@ -145,12 +162,10 @@ class TestDiscordIntegration:
 
         # Find Discord call and verify payload
         discord_payload = None
-        for call in mock_post.call_args_list:
-            call_args_str = str(call)
-            if 'discord.com' in call_args_str:
-                call_kwargs = call[1]
-                if 'json' in call_kwargs:
-                    discord_payload = call_kwargs['json']
+        for url, kwargs in post_calls:
+            if 'discord.com' in str(url):
+                if 'json' in kwargs:
+                    discord_payload = kwargs['json']
                     break
 
         # Verify Discord payload if Discord webhook is configured

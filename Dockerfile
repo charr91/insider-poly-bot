@@ -40,6 +40,9 @@ ENV PATH=/root/.local/bin:$PATH
 # Copy application code
 COPY . .
 
+# Install the package to create CLI entry point (insider-bot command)
+RUN pip install --no-cache-dir -e .
+
 # Create directories for persistent data
 RUN mkdir -p /app/data/logs
 
