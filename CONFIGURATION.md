@@ -184,62 +184,17 @@ Controls notification settings and alert behavior across Discord and Telegram.
 
 #### Testing Alert Connections
 
-Test your alert system configuration with the CLI command:
+Test your alert configuration:
 
 ```bash
-# Test alert connections (sends actual test messages)
 insider-bot alerts test
 ```
 
-This command will:
-1. **Show Configuration Status**: Display which channels are configured (Discord/Telegram)
-2. **Send Test Messages**: Send actual test alerts to each configured channel
-3. **Report Results**: Show success/failure for each channel with detailed feedback
-4. **Provide Guidance**: Display setup instructions if channels aren't configured
-
-**Example Output:**
-```
-🧪 Testing Alert System Connections
-
-┌─ Alert Channel Configuration ─────────────────────────┐
-│ Channel  │    Status     │ Details                    │
-├──────────┼───────────────┼────────────────────────────┤
-│ Discord  │ ✓ Configured  │ https://discord.com/api... │
-│ Telegram │ ✓ Configured  │ Chat ID: 7182973735        │
-└──────────┴───────────────┴────────────────────────────┘
-
-Sending Test Messages...
-
-✅ Discord: Test message sent successfully
-✅ Telegram: Test message sent successfully
-
-✅ All 2 configured channel(s) working!
-```
-
 **Setup Requirements:**
+- Discord: Add `DISCORD_WEBHOOK` to `.env`
+- Telegram: Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to `.env` (get from @BotFather)
 
-**For Discord:**
-```bash
-# Add to .env file:
-DISCORD_WEBHOOK=https://discord.com/api/webhooks/your_webhook_url_here
-```
-
-**For Telegram:**
-```bash
-# Add to .env file:
-TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz  # From @BotFather
-TELEGRAM_CHAT_ID=your_chat_id_here                         # From getUpdates API
-
-# Steps to get Telegram credentials:
-# 1. Create bot: Message @BotFather on Telegram and use /newbot command
-# 2. Get chat ID: Message your bot, then visit:
-#    https://api.telegram.org/bot<YourBOTToken>/getUpdates
-```
-
-**Troubleshooting:**
-- **Discord fails**: Verify webhook URL is correct and not expired
-- **Telegram fails**: Ensure both bot token AND chat ID are set
-- **No channels configured**: Add credentials to `.env` file and retry
+> 📖 **For detailed troubleshooting, see [Troubleshooting Guide](TROUBLESHOOTING.md#alert-configuration-issues)**
 
 ### Debug Configuration (`debug`)
 
@@ -270,86 +225,18 @@ Development and troubleshooting options.
 ## 🔧 Configuration Examples
 
 ### Conservative Detection (Fewer False Positives)
-```json
-{
-  "detection": {
-    "volume_thresholds": {
-      "volume_spike_multiplier": 5.0,
-      "z_score_threshold": 4.0
-    },
-    "whale_thresholds": {
-      "whale_threshold_usd": 25000,
-      "coordination_threshold": 0.8,
-      "min_whales_for_coordination": 5
-    },
-    "price_thresholds": {
-      "rapid_movement_pct": 25,
-      "price_movement_std": 3.0,
-      "volatility_spike_multiplier": 4.0,
-      "momentum_threshold": 0.9
-    }
-  },
-  "alerts": {
-    "min_severity": "HIGH"
-  }
-}
-```
+Higher thresholds reduce noise: `volume_spike_multiplier: 5.0`, `whale_threshold_usd: 25000`, `rapid_movement_pct: 25`, `min_severity: "HIGH"`
 
 ### Aggressive Detection (More Sensitive)
-```json
-{
-  "detection": {
-    "volume_thresholds": {
-      "volume_spike_multiplier": 2.0,
-      "z_score_threshold": 2.0
-    },
-    "whale_thresholds": {
-      "whale_threshold_usd": 5000,
-      "coordination_threshold": 0.5,
-      "min_whales_for_coordination": 2
-    },
-    "price_thresholds": {
-      "rapid_movement_pct": 8,
-      "price_movement_std": 1.5,
-      "volatility_spike_multiplier": 2.0,
-      "momentum_threshold": 0.6
-    }
-  },
-  "alerts": {
-    "min_severity": "LOW"
-  }
-}
-```
+Lower thresholds catch more activity: `volume_spike_multiplier: 2.0`, `whale_threshold_usd: 5000`, `rapid_movement_pct: 8`, `min_severity: "LOW"`
 
 ### High-Volume Markets Only
-```json
-{
-  "monitoring": {
-    "volume_threshold": 50000,
-    "max_markets": 20,
-    "sort_by_volume": true
-  }
-}
-```
+Focus on liquid markets: `volume_threshold: 50000`, `max_markets: 20`
 
-### Development/Testing Configuration
-```json
-{
-  "api": {
-    "simulation_mode": true
-  },
-  "debug": {
-    "debug_mode": true,
-    "show_normal_activity": true,
-    "activity_report_interval": 10,
-    "verbose_analysis": true
-  },
-  "alerts": {
-    "min_severity": "LOW",
-    "max_alerts_per_hour": 100
-  }
-}
-```
+### Development/Testing
+Enable detailed logging: `simulation_mode: true`, `debug_mode: true`, `verbose_analysis: true`, `max_alerts_per_hour: 100`
+
+> 💡 **See `insider_config.json` for full configuration examples**
 
 ## 🎯 Tuning Guidelines
 
@@ -372,36 +259,8 @@ Development and troubleshooting options.
 
 ### Performance Optimization
 
-**High-Performance Setup**
-```json
-{
-  "monitoring": {
-    "max_markets": 25,
-    "check_interval": 30,
-    "analysis_interval": 30
-  },
-  "debug": {
-    "debug_mode": false,
-    "show_normal_activity": false,
-    "verbose_analysis": false
-  }
-}
-```
-
-**Resource-Constrained Environment**
-```json
-{
-  "monitoring": {
-    "max_markets": 10,
-    "check_interval": 120,
-    "analysis_interval": 120,
-    "volume_threshold": 10000
-  },
-  "api": {
-    "websocket_enabled": false
-  }
-}
-```
+**High-Performance**: Lower intervals (30s), fewer markets (25), disable debug logging
+**Resource-Constrained**: Higher intervals (120s), fewer markets (10), disable WebSocket
 
 ## 🔐 Environment Variables
 
