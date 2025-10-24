@@ -231,7 +231,10 @@ class MarketMonitor:
 
         gamma_api = "https://gamma-api.polymarket.com"
         volume_threshold = self.config.get('monitoring', {}).get('volume_threshold', 1000)
-        max_markets = self.config.get('monitoring', {}).get('max_markets', 50)
+        max_markets_config = self.config.get('monitoring', {}).get('max_markets')
+        # If max_markets is null, fetch a large batch for discovery (500 markets)
+        # Volume threshold will filter to actual high-volume markets
+        max_markets = max_markets_config if max_markets_config is not None else 500
         sort_by_volume = self.config.get('monitoring', {}).get('sort_by_volume', True)
 
         try:
