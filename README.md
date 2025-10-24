@@ -6,15 +6,12 @@ A sophisticated bot that monitors Polymarket trading activity to identify potent
 
 ## 📚 Documentation
 
-| Document | Description |
-|----------|-------------|
-| **[📖 Configuration Guide](CONFIGURATION.md)** | Complete reference for `insider_config.json` parameters and setup |
-| **[💻 Usage Examples](USAGE.md)** | Detailed usage patterns, commands, and operational scenarios |
-| **[🧪 Testing Guide](TESTING.md)** | Comprehensive testing documentation and development guidelines |
-| **[🏗️ Architecture Guide](ARCHITECTURE.md)** | System architecture, database patterns, and design decisions |
-| **[🔧 Troubleshooting](TROUBLESHOOTING.md)** | Common issues, solutions, and FAQ for quick problem resolution |
-
-> 💡 **Quick Links**: [Installation](#-installation) • [Quick Start](#-quick-start) • [Configuration](CONFIGURATION.md) • [Usage Examples](USAGE.md) • [Testing](TESTING.md) • [Architecture](ARCHITECTURE.md) • [Troubleshooting](TROUBLESHOOTING.md)
+- **[Configuration Guide](CONFIGURATION.md)** - Complete setup and parameter reference
+- **[Usage Examples](USAGE.md)** - Commands and operational scenarios
+- **[Testing Guide](TESTING.md)** - Testing documentation and development guidelines
+- **[Architecture Guide](ARCHITECTURE.md)** - System design, database patterns, and technical details
+- **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
+- **[Deployment Guide](DEPLOYMENT.md)** - Docker setup and VPS deployment
 
 ## ✨ Key Features
 
@@ -160,81 +157,12 @@ insider-poly-bot/
 
 ## 📊 Detection Capabilities
 
-### Volume Analysis
-- **Volume Spike Detection**: Identifies trades with volumes 3x+ above average
-- **Z-Score Analysis**: Statistical significance testing for unusual activity
-- **Historical Comparison**: Compares current activity to historical patterns
+- **Volume Spike Detection** - Statistical Z-score analysis identifies trades 3x+ above average
+- **Whale Detection** - Tracks large trades ($10K+) and coordinated whale activity
+- **Price Movement Analysis** - Detects rapid price changes (15%+) and volatility spikes
+- **Coordination Detection** - Identifies synchronized trading patterns across multiple wallets
 
-### Whale Detection  
-- **Large Trade Identification**: Configurable USD thresholds for significant trades
-- **Wallet Coordination**: Detects multiple large wallets acting in coordination
-- **Market Impact Analysis**: Measures price impact of large trades
-
-### Price Movement Analysis
-- **Rapid Movement Detection**: Identifies sudden price changes (15%+ default)
-- **Volatility Spike Detection**: Detects unusual volatility patterns
-- **Momentum Analysis**: Measures sustained directional movement
-
-### Coordination Detection
-- **Multi-Wallet Analysis**: Identifies coordinated activity across wallets
-- **Timing Analysis**: Detects synchronized trading patterns
-- **Directional Bias**: Measures coordinated directional trading
-
-## 📊 Technical Fields Reference
-
-Understanding the key metrics and scores used in alert analysis:
-
-### 🎯 Anomaly Score System
-- **Calculation Method**: Z-score based (standard deviations above historical baseline)
-- **Interpretation Scale**:
-  - **0-2**: Normal market activity
-  - **3-5**: Unusual but not necessarily suspicious activity
-  - **6-8**: Potentially suspicious activity worth monitoring
-  - **8+**: High anomaly requiring investigation
-  - **10+**: Critical anomaly (very rare, immediate attention)
-
-### 🎯 Confidence Scoring System
-Multi-metric scoring system that combines various detection signals:
-
-- **Single Anomaly Threshold**: `8.0` - High confidence required for single-metric alerts
-- **Multi-Anomaly Threshold**: `10.0` - Combined metrics increase detection sensitivity
-- **Critical Threshold**: `15.0` - Immediate attention required
-
-**Confidence Bonuses Applied**:
-- Historical Baseline Match: `+1.0`
-- Coordination Detected: `+2.0` 
-- Directional Bias: `+1.0`
-- Multi-Trigger Events: `+2.0`
-- Wash Trading Patterns: `+2.0`
-
-### 🎯 Detection Parameters
-
-**Volume Spike Detection**:
-- **Multiplier**: `3.0x` above baseline average
-- **Statistical Analysis**: Z-score threshold of `3.0`
-- **Baseline Period**: 7-day historical data window
-
-**Whale Activity Thresholds**:
-- **Minimum Trade Size**: `$10,000` USD
-- **Coordination Threshold**: `0.7` (70% directional alignment)
-- **Minimum Whales**: `3+` for coordination detection
-
-**Price Movement Analysis**:
-- **Rapid Movement**: `15%` price change threshold
-- **Volatility Multiplier**: `3.0x` above normal volatility
-- **Momentum Threshold**: `0.8` for sustained directional movement
-
-**Coordination Detection**:
-- **Minimum Wallets**: `5` coordinated wallets required
-- **Time Window**: `30` seconds for coordination analysis
-- **Directional Bias**: `0.8` threshold for coordinated direction
-- **Burst Intensity**: `3.0` multiplier for rapid coordination
-
-### 🎯 Cross-Market Filtering
-- **Analysis Window**: `15` minutes for cross-market correlation
-- **Similar Market Threshold**: `3+` markets showing similar patterns
-- **Volume Surge Detection**: `4+` markets with simultaneous volume increases
-- **Filter Strategy**: Quality-based filtering using confidence scores and anomaly strength
+> 📖 **For detailed detection parameters and scoring systems, see [Architecture Guide](ARCHITECTURE.md)**
 
 ## 🔐 Security Features
 
@@ -289,50 +217,13 @@ The bot now includes a robust database persistence layer for tracking alerts, wh
 
 ### Market Maker Detection
 
-The bot uses a sophisticated heuristic algorithm to automatically identify market makers:
+Automatically identifies and filters market makers using heuristic scoring (frequency, balance, diversity, consistency). Addresses with score ≥70 are classified as market makers and excluded from whale alerts.
 
-- **Frequency Analysis** (30 points): High-frequency trading patterns
-- **Balance Analysis** (40 points): Buy/sell volume balance (targets 50/50)
-- **Diversity Analysis** (20 points): Number of unique markets traded
-- **Consistency Analysis** (10 points): Days active in the system
+> 📖 **For detailed scoring algorithm, see [Architecture Guide](ARCHITECTURE.md#market-maker-detection)**
 
-**Classification**: Score ≥70 = Market Maker (excluded from whale tracking)
+**Database Tables**: alerts, alert_outcomes, whale_addresses, whale_alert_associations
 
-### Database Schema
-
-```
-alerts                     # All generated alerts
-├── id
-├── market_id
-├── alert_type
-├── severity
-├── timestamp
-├── analysis (JSON)
-└── confidence_score
-
-alert_outcomes            # Performance tracking
-├── alert_id (FK)
-├── price_at_alert
-├── price_1h/4h/24h_after
-├── predicted_direction
-├── was_profitable
-└── market_resolution
-
-whale_addresses          # Tracked whales
-├── address
-├── total_volume_usd
-├── trade_count
-├── buy/sell_volume_usd
-├── is_market_maker
-├── market_maker_score
-└── tags (JSON)
-
-whale_alert_associations # Links whales to alerts
-├── whale_id (FK)
-├── alert_id (FK)
-├── whale_volume_in_alert
-└── whale_role
-```
+> 📖 **For complete schema details, see [Architecture Guide](ARCHITECTURE.md#database-schema)**
 
 ## 🖥️ CLI Usage
 
@@ -401,46 +292,16 @@ insider-bot alerts by-market <market-id>
 
 #### Testing Alert Connections
 
-The `alerts test` command tests your Discord and Telegram alert configurations by sending actual test messages:
+Test your Discord and Telegram configurations by sending actual test messages:
 
 ```bash
-# Test with default config
-insider-bot alerts test
-
-# Test with custom config file
-insider-bot alerts test --config my_config.json
+insider-bot alerts test                      # Test with default config
+insider-bot alerts test --config my_config.json  # Test with custom config
 ```
 
-**What it does:**
-- Shows which alert channels are configured
-- Sends a test message to each configured channel
-- Displays detailed results for each channel
-- Provides setup instructions if no channels are configured
+**Prerequisites**: Set `DISCORD_WEBHOOK`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID` in `.env` file.
 
-**Example Output:**
-```
-🧪 Testing Alert System Connections
-
-┌─ Alert Channel Configuration ─────────────────────────┐
-│ Channel  │    Status     │ Details                    │
-├──────────┼───────────────┼────────────────────────────┤
-│ Discord  │ ✓ Configured  │ https://discord.com/api... │
-│ Telegram │ ✓ Configured  │ Chat ID: 7182973735        │
-└──────────┴───────────────┴────────────────────────────┘
-
-Sending Test Messages...
-
-✅ Discord: Test message sent successfully
-✅ Telegram: Test message sent successfully
-
-✅ All 2 configured channel(s) working!
-```
-
-**Prerequisites:**
-- Discord: Set `DISCORD_WEBHOOK` in `.env` file
-- Telegram: Set both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` file
-
-See [CONFIGURATION.md](CONFIGURATION.md#alert-configuration) for detailed setup instructions.
+> 📖 **For detailed alert setup, see [Configuration Guide](CONFIGURATION.md#alert-configuration)**
 
 ### Statistics Commands
 
@@ -488,47 +349,18 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#database-issues) for database-relate
 ```bash
 # Check top whales
 $ insider-bot whales top --limit 5
-
-Top 5 Whales by Volume
-
- 1. 0x1a2b3c4d...5e6f  $   125,000  (45 trades)
- 2. 0x9f8e7d6c...5b4a  $    98,500  (32 trades)
- 3. 0x3c4d5e6f...7a8b  $    87,300  (28 trades)
- 4. 0x6f7a8b9c...0d1e  $    76,200  (41 trades)
- 5. 0x2b3c4d5e...6f7a  $    65,800  (19 trades)
+Top 5 Whales: 0x1a2b... ($125K, 45 trades), 0x9f8e... ($98.5K, 32 trades)...
 
 # Check performance
 $ insider-bot stats performance --days 7
+Alert Performance (7d): 24 total, 16 profitable (66.7%), Avg: +3.45%
 
-┌─────────────────────────────────────┐
-│  📊 Alert Performance (7d)          │
-├─────────────────────────────────────┤
-│ Period: Last 7 days                 │
-│                                     │
-│ Alert Outcomes:                     │
-│   Total Alerts: 24                  │
-│   Profitable: 16 (66.7%)            │
-│   Unprofitable: 8                   │
-│                                     │
-│ Profitability Metrics:              │
-│   Win Rate: 66.7%                   │
-│   Avg Profit: +3.45%                │
-│                                     │
-│ Overall Status: ✅ Excellent        │
-└─────────────────────────────────────┘
-
-# View recent high-severity alerts
+# View recent alerts
 $ insider-bot alerts recent --severity HIGH --hours 12
-
-┌────────────────────────────────────────────────┐
-│              Recent Alerts (Last 12h)          │
-├────┬──────────┬──────────────┬──────┬─────────┤
-│ ID │   Time   │   Market     │ Type │Severity │
-├────┼──────────┼──────────────┼──────┼─────────┤
-│ 42 │ 01/15... │ Will Trump...│WHALE │🟠 HIGH  │
-│ 41 │ 01/15... │ Bitcoin to...│COORD │🟠 HIGH  │
-└────┴──────────┴──────────────┴──────┴─────────┘
+2 HIGH alerts: Will Trump... (WHALE), Bitcoin to... (COORD)
 ```
+
+> 💻 **For complete CLI documentation, see [Usage Guide](USAGE.md#cli-commands)**
 
 ## 🐳 Deployment
 
@@ -556,19 +388,10 @@ See **[DEPLOYMENT.md](DEPLOYMENT.md)** for complete setup instructions, monitori
 
 For advanced VPS deployment with automated backups and monitoring, see [deployment/ADVANCED.md](deployment/ADVANCED.md).
 
-## 📖 Documentation Navigation
+---
 
-| **Getting Started** | **Configuration** | **Operations** | **Development** | **Support** |
-|:-------------------|:------------------|:---------------|:----------------|:------------|
-| [📦 Installation](#-installation) | [⚙️ Configuration Guide](CONFIGURATION.md) | [💻 Usage Examples](USAGE.md) | [🧪 Testing Guide](TESTING.md) | [🔧 Troubleshooting](TROUBLESHOOTING.md) |
-| [🚀 Quick Start](#-quick-start) | [🎛️ Tuning Guidelines](CONFIGURATION.md#-tuning-guidelines) | [🐳 Docker Deployment](DEPLOYMENT.md) | [🏗️ Test Architecture](TESTING.md#-test-architecture) | [❓ FAQ](TROUBLESHOOTING.md#-frequently-asked-questions) |
-| [📁 Project Structure](#-project-structure) | [🔐 Environment Setup](CONFIGURATION.md#-environment-variables) | [📊 Performance Tips](USAGE.md#-performance-optimization) | [🚀 Running Tests](TESTING.md#-running-tests) | [🚨 Emergency Procedures](TROUBLESHOOTING.md#-emergency-procedures) |
-
-### Quick Reference
-- **First time setup**: [Installation](#-installation) → [Configuration](CONFIGURATION.md) → [Quick Start](#-quick-start)
-- **Docker deployment**: [Deployment](#-deployment) → [DEPLOYMENT.md](DEPLOYMENT.md)
-- **Database & CLI**: [Database Features](#-database--persistence) → [CLI Usage](#-cli-usage)
-- **Customization**: [Configuration Guide](CONFIGURATION.md) → [Usage Examples](USAGE.md)
-- **Development**: [Testing Guide](TESTING.md) → [Writing Tests](TESTING.md#-writing-new-tests)
-- **Issues**: [Troubleshooting](TROUBLESHOOTING.md) → [FAQ](TROUBLESHOOTING.md#-frequently-asked-questions)
-- **Advanced deployment**: [Advanced VPS Setup](deployment/ADVANCED.md)
+**📖 Quick Reference**
+- **Setup**: [Installation](#-installation) → [Configuration](CONFIGURATION.md) → [Quick Start](#-quick-start)
+- **Deploy**: [Docker Setup](#-deployment) → [DEPLOYMENT.md](DEPLOYMENT.md)
+- **Develop**: [Testing Guide](TESTING.md) → [Architecture](ARCHITECTURE.md)
+- **Issues**: [Troubleshooting](TROUBLESHOOTING.md)
