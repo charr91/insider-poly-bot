@@ -104,13 +104,57 @@ class DataAPIClient:
             logger.error(f"Error parsing JSON for market {market_id[:10]}...: {e}")
             return []
     
-    async def get_recent_trades(self, market_ids: List[str], limit: int = 100) -> List[Dict]:
+    async def get_recent_trades(self, market_ids: List[str], limit: int = 100, batch_size: int = 25) -> List[Dict]:
         """
-        Get recent trades across multiple markets.
+        Get recent trades across multiple markets with automatic batching.
+
+        Batches large market lists to avoid 414 Request-URI Too Large errors.
+        URL length limit ~2000 chars, batch_size=25 keeps us safely under this.
 
         Args:
             market_ids: List of market condition IDs to filter by (empty = all markets)
-            limit: Maximum number of trades to return (capped at 500)
+            limit: Maximum number of trades to return per request (capped at 500)
+            batch_size: Number of markets per batch to avoid URI length limits
+
+        Returns:
+            List of trade dictionaries from all batches combined
+        """
+        # Handle empty or small lists - no batching needed
+        if not market_ids or len(market_ids) <= batch_size:
+            return await self._fetch_recent_trades_batch(market_ids, limit)
+
+        # Split into batches to avoid URL length limits
+        batches = [market_ids[i:i+batch_size] for i in range(0, len(market_ids), batch_size)]
+        logger.debug(f"Batching {len(market_ids)} markets into {len(batches)} requests (batch_size={batch_size})")
+
+        # Fetch all batches concurrently for performance
+        tasks = [self._fetch_recent_trades_batch(batch, limit) for batch in batches]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Combine results from all batches, filtering out errors
+        all_trades = []
+        errors = 0
+        for i, result in enumerate(batch_results):
+            if isinstance(result, Exception):
+                logger.warning(f"Batch {i+1}/{len(batches)} failed: {result}")
+                errors += 1
+            elif isinstance(result, list):
+                all_trades.extend(result)
+
+        if errors > 0:
+            logger.warning(f"Completed with {errors}/{len(batches)} batch errors, got {len(all_trades)} trades")
+        else:
+            logger.debug(f"Fetched {len(all_trades)} trades from {len(batches)} batches")
+
+        return all_trades
+
+    async def _fetch_recent_trades_batch(self, market_ids: List[str], limit: int) -> List[Dict]:
+        """
+        Fetch recent trades for a single batch of markets (internal helper).
+
+        Args:
+            market_ids: List of market IDs for this batch (or empty for all markets)
+            limit: Maximum number of trades to return
 
         Returns:
             List of trade dictionaries
