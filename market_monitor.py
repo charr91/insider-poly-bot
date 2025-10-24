@@ -22,6 +22,7 @@ from detection import VolumeDetector, WhaleDetector, PriceDetector, Coordination
 from detection.fresh_wallet_detector import FreshWalletDetector
 from alerts.alert_manager import AlertManager
 from config.settings import Settings
+from config.database import DATABASE_PATH
 from common import (
     AlertType, AlertSeverity, BaselineType, MarketStatus, DetectorStatus,
     AlertMetadata, Alert, MarketBaseline, DetectionResult,
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 class MarketMonitor:
     """Main orchestrator for market monitoring and insider detection"""
     
-    def __init__(self, config_path: str = "insider_config.json", db_path: str = "insider_data.db"):
+    def __init__(self, config_path: str = "insider_config.json", db_path: str = DATABASE_PATH):
         # Load configuration
         self.config = self._load_config(config_path)
         self.settings = Settings(self.config)

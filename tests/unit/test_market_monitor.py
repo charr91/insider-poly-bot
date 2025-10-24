@@ -7,6 +7,7 @@ import asyncio
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from datetime import datetime
 from market_monitor import MarketMonitor
+from config.database import DATABASE_PATH, get_connection_string
 
 
 @pytest.fixture
@@ -278,13 +279,69 @@ class TestWebSocketIntegration:
 
 class TestDataAPIIntegration:
     """Test Data API integration"""
-    
+
     def test_data_api_initialization(self):
         """Test Data API client initialization"""
         monitor = MarketMonitor('test_config.json')
-        
+
         assert hasattr(monitor, 'data_api')
         assert monitor.data_api is not None
+
+
+class TestDatabaseConfiguration:
+    """Test database path configuration"""
+
+    @patch('market_monitor.MarketMonitor._load_config')
+    @patch('market_monitor.DatabaseManager')
+    def test_market_monitor_default_db_path(self, mock_db_manager, mock_load_config, mock_config):
+        """Verify MarketMonitor uses DATABASE_PATH as default"""
+        mock_load_config.return_value = mock_config
+        mock_db_instance = MagicMock()
+        mock_db_manager.get_instance.return_value = mock_db_instance
+
+        # Create monitor without specifying db_path
+        monitor = MarketMonitor('test_config.json')
+
+        # Verify DatabaseManager.get_instance was called with default DATABASE_PATH
+        expected_conn_str = get_connection_string(DATABASE_PATH)
+        mock_db_manager.get_instance.assert_called_once_with(expected_conn_str)
+
+    @patch('market_monitor.MarketMonitor._load_config')
+    @patch('market_monitor.DatabaseManager')
+    def test_market_monitor_custom_db_path(self, mock_db_manager, mock_load_config, mock_config):
+        """Verify MarketMonitor accepts and uses custom db_path"""
+        mock_load_config.return_value = mock_config
+        mock_db_instance = MagicMock()
+        mock_db_manager.get_instance.return_value = mock_db_instance
+
+        custom_path = "custom/test.db"
+
+        # Create monitor with custom db_path
+        monitor = MarketMonitor('test_config.json', db_path=custom_path)
+
+        # Verify DatabaseManager.get_instance was called with custom path
+        expected_conn_str = get_connection_string(custom_path)
+        mock_db_manager.get_instance.assert_called_once_with(expected_conn_str)
+
+    @patch('market_monitor.MarketMonitor._load_config')
+    @patch('market_monitor.DatabaseManager')
+    def test_market_monitor_db_path_passed_to_components(self, mock_db_manager, mock_load_config, mock_config):
+        """Verify db_path is properly passed through to DatabaseManager"""
+        mock_load_config.return_value = mock_config
+        mock_db_instance = MagicMock()
+        mock_db_manager.get_instance.return_value = mock_db_instance
+
+        test_path = "data/test_db.db"
+
+        # Create monitor
+        monitor = MarketMonitor('test_config.json', db_path=test_path)
+
+        # Verify correct connection string was used
+        call_args = mock_db_manager.get_instance.call_args
+        actual_conn_str = call_args[0][0]
+        expected_conn_str = f"sqlite+aiosqlite:///{test_path}"
+
+        assert actual_conn_str == expected_conn_str
 
 
 class TestStatusReporting:

@@ -16,6 +16,7 @@ from rich import box
 
 from database import DatabaseManager
 from persistence.whale_tracker import WhaleTracker
+from config.database import get_connection_string
 
 console = Console()
 
@@ -39,7 +40,7 @@ def list_whales(ctx, limit, exclude_mm, min_volume, sort_by):
 
 async def _list_whales_async(db_path, limit, exclude_mm, min_volume, sort_by):
     """Async implementation of list whales"""
-    db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+    db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
     await db_manager.init_db()
 
     whale_tracker = WhaleTracker(db_manager)
@@ -97,7 +98,7 @@ def show_whale(ctx, address):
 
 async def _show_whale_async(db_path, address):
     """Async implementation of show whale"""
-    db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+    db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
     await db_manager.init_db()
 
     whale_tracker = WhaleTracker(db_manager)
@@ -151,7 +152,7 @@ def top_whales(ctx, limit):
 
 async def _top_whales_async(db_path, limit):
     """Async implementation of top whales"""
-    db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+    db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
     await db_manager.init_db()
 
     whale_tracker = WhaleTracker(db_manager)

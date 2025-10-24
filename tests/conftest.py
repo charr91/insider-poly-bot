@@ -87,7 +87,7 @@ def clean_environment():
     """Ensure clean test environment"""
     # Store original environment
     original_env = dict(os.environ)
-    
+
     # Set test environment variables
     test_env = {
         'DISCORD_WEBHOOK': '',
@@ -97,14 +97,30 @@ def clean_environment():
         'POLYGON_PRIVATE_KEY': '0x' + '0' * 64,
         'FUNDER_ADDRESS': '0x' + '0' * 40
     }
-    
+
     os.environ.update(test_env)
-    
+
     yield
-    
+
     # Restore original environment
     os.environ.clear()
     os.environ.update(original_env)
+
+
+@pytest.fixture
+def test_database_path(tmp_path):
+    """
+    Provide temporary database path for testing.
+
+    Returns absolute path to a temporary database file that will be
+    cleaned up after the test completes.
+
+    Usage:
+        def test_something(test_database_path):
+            db_path = test_database_path
+            # Use db_path for testing
+    """
+    return str(tmp_path / "test_insider.db")
 
 
 @pytest.fixture(autouse=True)

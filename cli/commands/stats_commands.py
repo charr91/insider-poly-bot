@@ -16,6 +16,7 @@ from rich import box
 from database import DatabaseManager
 from persistence.outcome_tracker import OutcomeTracker
 from data_sources.data_api_client import DataAPIClient
+from config.database import get_connection_string
 
 console = Console()
 
@@ -36,7 +37,7 @@ def performance_stats(ctx, days):
 
 async def _performance_stats_async(db_path, days):
     """Async implementation of performance stats"""
-    db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+    db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
     await db_manager.init_db()
 
     # Use async context manager for DataAPIClient
@@ -107,7 +108,7 @@ def summary_stats(ctx):
 
 async def _summary_stats_async(db_path):
     """Async implementation of summary stats"""
-    db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+    db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
     await db_manager.init_db()
 
     from database import AlertRepository, WhaleRepository, OutcomeRepository
@@ -159,7 +160,7 @@ def whale_stats(ctx):
 
 async def _whale_stats_async(db_path):
     """Async implementation of whale stats"""
-    db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+    db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
     await db_manager.init_db()
 
     from database import WhaleRepository

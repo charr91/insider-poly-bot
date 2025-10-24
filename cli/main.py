@@ -18,10 +18,11 @@ from dotenv import load_dotenv
 from cli.commands.whale_commands import whales
 from cli.commands.alert_commands import alerts
 from cli.commands.stats_commands import stats
+from config.database import DATABASE_PATH
 
 
 @click.group()
-@click.option('--db-path', default='insider_data.db', help='Path to database file')
+@click.option('--db-path', default=DATABASE_PATH, help='Path to database file')
 @click.pass_context
 def cli(ctx, db_path):
     """

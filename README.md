@@ -11,9 +11,10 @@ A sophisticated bot that monitors Polymarket trading activity to identify potent
 | **[📖 Configuration Guide](CONFIGURATION.md)** | Complete reference for `insider_config.json` parameters and setup |
 | **[💻 Usage Examples](USAGE.md)** | Detailed usage patterns, commands, and operational scenarios |
 | **[🧪 Testing Guide](TESTING.md)** | Comprehensive testing documentation and development guidelines |
+| **[🏗️ Architecture Guide](ARCHITECTURE.md)** | System architecture, database patterns, and design decisions |
 | **[🔧 Troubleshooting](TROUBLESHOOTING.md)** | Common issues, solutions, and FAQ for quick problem resolution |
 
-> 💡 **Quick Links**: [Installation](#-installation) • [Quick Start](#-quick-start) • [Configuration](CONFIGURATION.md) • [Usage Examples](USAGE.md) • [Testing](TESTING.md) • [Troubleshooting](TROUBLESHOOTING.md)
+> 💡 **Quick Links**: [Installation](#-installation) • [Quick Start](#-quick-start) • [Configuration](CONFIGURATION.md) • [Usage Examples](USAGE.md) • [Testing](TESTING.md) • [Architecture](ARCHITECTURE.md) • [Troubleshooting](TROUBLESHOOTING.md)
 
 ## ✨ Key Features
 

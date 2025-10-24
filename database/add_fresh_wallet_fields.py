@@ -12,24 +12,27 @@ import asyncio
 import logging
 from pathlib import Path
 from sqlalchemy import text
+import sys
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config.database import DATABASE_PATH, get_connection_string
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def run_migration(db_path: str = "insider_data.db"):
+async def run_migration(db_path: str = DATABASE_PATH):
     """
     Add is_fresh_wallet and verified_fresh columns to whale_addresses table.
 
     Args:
         db_path: Path to the SQLite database file
     """
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
     from database.database import DatabaseManager
 
     # Initialize database manager
-    db_url = f"sqlite+aiosqlite:///{db_path}"
+    db_url = get_connection_string(db_path)
     db_manager = DatabaseManager.get_instance(db_url)
 
     logger.info(f"Starting migration on database: {db_path}")
@@ -73,18 +76,16 @@ async def run_migration(db_path: str = "insider_data.db"):
         raise
 
 
-async def verify_migration(db_path: str = "insider_data.db"):
+async def verify_migration(db_path: str = DATABASE_PATH):
     """
     Verify that the migration was applied correctly.
 
     Args:
         db_path: Path to the SQLite database file
     """
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
     from database.database import DatabaseManager
 
-    db_url = f"sqlite+aiosqlite:///{db_path}"
+    db_url = get_connection_string(db_path)
     db_manager = DatabaseManager.get_instance(db_url)
 
     async with db_manager.session() as session:
@@ -104,9 +105,7 @@ async def verify_migration(db_path: str = "insider_data.db"):
 
 
 if __name__ == "__main__":
-    import sys
-
-    db_path = sys.argv[1] if len(sys.argv) > 1 else "insider_data.db"
+    db_path = sys.argv[1] if len(sys.argv) > 1 else DATABASE_PATH
 
     # Check if database exists
     if not Path(db_path).exists():

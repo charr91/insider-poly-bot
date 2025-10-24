@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from database import DatabaseManager, AlertRepository
 from alerts.alert_manager import AlertManager
 from config.settings import Settings
+from config.database import get_connection_string
 
 console = Console()
 
@@ -44,7 +45,7 @@ def recent_alerts(ctx, hours, severity, limit):
 
 async def _recent_alerts_async(db_path, hours, severity, limit):
     """Async implementation of recent alerts"""
-    db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+    db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
     await db_manager.init_db()
 
     async with db_manager.session() as session:
@@ -103,7 +104,7 @@ def show_alert(ctx, alert_id):
 
 async def _show_alert_async(db_path, alert_id):
     """Async implementation of show alert"""
-    db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+    db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
     await db_manager.init_db()
 
     async with db_manager.session() as session:
@@ -157,7 +158,7 @@ def alerts_by_market(ctx, market_id, limit):
 
 async def _alerts_by_market_async(db_path, market_id, limit):
     """Async implementation of alerts by market"""
-    db_manager = DatabaseManager.get_instance(f"sqlite+aiosqlite:///{db_path}")
+    db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
     await db_manager.init_db()
 
     async with db_manager.session() as session:
