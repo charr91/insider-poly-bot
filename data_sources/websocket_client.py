@@ -136,9 +136,8 @@ class WebSocketClient:
                 logger.error(f"❌ WebSocket error message: {data}")
                 
             else:
-                # This is an order book update
+                # Order book update - track count for activity monitoring
                 self.order_books_received += 1
-                # Order book display removed - count now shown in System Status
                 if self.debug_mode:
                     logger.debug(f"📩 Order book #{self.order_books_received} for market {data.get('market', 'Unknown')[:10]}...")
                 

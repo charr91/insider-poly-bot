@@ -227,7 +227,6 @@ class AlertManager:
             # Clean old history
             await self.storage.clear_old_alerts()
 
-            # Alert was successfully sent
             return True
 
         except Exception as e:
