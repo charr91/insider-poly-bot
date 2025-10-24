@@ -28,7 +28,7 @@ def complete_mock_config():
                 'z_score_threshold': 3.0
             },
             'whale_thresholds': {
-                'whale_threshold_usd': 10000,
+                'whale_threshold_usd': 2000,
                 'coordination_threshold': 0.7,
                 'min_whales_for_coordination': 3
             },

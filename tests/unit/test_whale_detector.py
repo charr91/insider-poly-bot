@@ -81,9 +81,9 @@ class TestWhaleDetector:
     def test_detect_whale_activity_no_whales(self, detector, normal_trades):
         """Test whale detection with normal-sized trades."""
         result = detector.detect_whale_activity(normal_trades)
-        
+
         assert not result['anomaly']
-        assert '$10000 threshold' in result['reason']
+        assert '$2000 threshold' in result['reason']
         assert result['total_trades'] > 0
         assert result['largest_trade'] > 0
     

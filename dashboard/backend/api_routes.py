@@ -249,16 +249,16 @@ async def get_configuration():
                 config = json.load(f)
             return config
         else:
-            # Return default config structure
+            # Return default config structure (matches insider_config.json)
             return {
                 "detection": {
                     "volume_spike_multiplier": 3.0,
-                    "whale_threshold_usd": 10000,
+                    "whale_threshold_usd": 2000,
                     "coordination_threshold": 0.7,
                     "price_change_threshold": 15.0
                 },
                 "monitoring": {
-                    "max_markets": 50,
+                    "max_markets": None,
                     "min_volume_threshold": 1000,
                     "time_window_seconds": 30
                 },

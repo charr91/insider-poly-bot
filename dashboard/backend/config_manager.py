@@ -35,7 +35,7 @@ class DashboardConfig:
             },
             "detection": {
                 "volume_spike_multiplier": 3.0,
-                "whale_threshold_usd": 10000,
+                "whale_threshold_usd": 2000,
                 "coordination_threshold": 0.7,
                 "price_change_threshold": 15.0,
                 "z_score_threshold": 3.0,
@@ -46,7 +46,7 @@ class DashboardConfig:
                 "burst_intensity_multiplier": 3.0
             },
             "monitoring": {
-                "max_markets": 50,
+                "max_markets": None,
                 "min_volume_threshold": 1000,
                 "baseline_days": 7,
                 "cross_market_window_minutes": 15,
@@ -209,7 +209,7 @@ class DashboardConfig:
                 validation_results["errors"].append("Volume spike multiplier must be positive number")
                 validation_results["valid"] = False
             
-            whale_threshold = self.get("detection.whale_threshold_usd", 10000)
+            whale_threshold = self.get("detection.whale_threshold_usd", 2000)
             if not isinstance(whale_threshold, (int, float)) or whale_threshold <= 0:
                 validation_results["errors"].append("Whale threshold must be positive number")
                 validation_results["valid"] = False

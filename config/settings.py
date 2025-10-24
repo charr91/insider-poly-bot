@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 class MonitoringSettings:
     """Settings for market monitoring"""
     volume_threshold: float = 1000
-    max_markets: Optional[int] = 50
+    max_markets: Optional[int] = None
     enable_low_volume_scanning: bool = True
-    max_low_volume_markets: Optional[int] = 200
+    max_low_volume_markets: Optional[int] = None
     whale_escalation_enabled: bool = True
     monitor_all_markets: bool = False
     check_interval: int = 60
@@ -31,18 +31,18 @@ class DetectionSettings:
     # Volume detection
     volume_spike_multiplier: float = 3.0
     z_score_threshold: float = 3.0
-    
+
     # Whale detection
-    whale_threshold_usd: float = 10000
+    whale_threshold_usd: float = 2000
     coordination_threshold: float = 0.7
     min_whales_for_coordination: int = 3
-    
+
     # Price detection
     rapid_movement_pct: float = 15
     price_movement_std: float = 2.5
     volatility_spike_multiplier: float = 3.0
     momentum_threshold: float = 0.8
-    
+
     # Coordination detection
     min_coordinated_wallets: int = 5
     coordination_time_window: int = 30
@@ -147,18 +147,18 @@ class Settings:
             # Volume
             volume_spike_multiplier=volume_thresholds.get('volume_spike_multiplier', 3.0),
             z_score_threshold=volume_thresholds.get('z_score_threshold', 3.0),
-            
+
             # Whale
-            whale_threshold_usd=whale_thresholds.get('whale_threshold_usd', 10000),
+            whale_threshold_usd=whale_thresholds.get('whale_threshold_usd', 2000),
             coordination_threshold=whale_thresholds.get('coordination_threshold', 0.7),
             min_whales_for_coordination=whale_thresholds.get('min_whales_for_coordination', 3),
-            
+
             # Price
             rapid_movement_pct=price_thresholds.get('rapid_movement_pct', 15),
             price_movement_std=price_thresholds.get('price_movement_std', 2.5),
             volatility_spike_multiplier=price_thresholds.get('volatility_spike_multiplier', 3.0),
             momentum_threshold=price_thresholds.get('momentum_threshold', 0.8),
-            
+
             # Coordination
             min_coordinated_wallets=coordination_thresholds.get('min_coordinated_wallets', 5),
             coordination_time_window=coordination_thresholds.get('coordination_time_window', 30),

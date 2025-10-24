@@ -106,59 +106,22 @@ class MarketMonitor:
         """Load configuration from file"""
         try:
             config_file = Path(config_path)
-            if config_file.exists():
-                with open(config_file) as f:
-                    config = json.load(f)
-                logger.info(f"Loaded configuration from {config_path}")
-                return config
+            if not config_file.exists():
+                logger.error(f"Config file not found: {config_path}")
+                logger.error("Config file is required. Please ensure insider_config.json exists and is valid.")
+                raise RuntimeError(f"Cannot load configuration file: {config_path} not found")
+
+            with open(config_file) as f:
+                config = json.load(f)
+            logger.info(f"Loaded configuration from {config_path}")
+            return config
+        except RuntimeError:
+            # Re-raise RuntimeError as-is
+            raise
         except Exception as e:
-            logger.warning(f"Failed to load config from {config_path}: {e}")
-        
-        # Return default configuration
-        return self._get_default_config()
-    
-    def _get_default_config(self) -> Dict:
-        """Get default configuration"""
-        return {
-            "monitoring": {
-                "volume_threshold": 1000,
-                "max_markets": 50,
-                "check_interval": 60,
-                "sort_by_volume": True
-            },
-            "detection": {
-                "volume_thresholds": {
-                    "volume_spike_multiplier": 3.0,
-                    "z_score_threshold": 3.0
-                },
-                "whale_thresholds": {
-                    "whale_threshold_usd": 10000,
-                    "coordination_threshold": 0.7,
-                    "min_whales_for_coordination": 3
-                },
-                "price_thresholds": {
-                    "rapid_movement_pct": 15,
-                    "price_movement_std": 2.5,
-                    "volatility_spike_multiplier": 3.0,
-                    "momentum_threshold": 0.8
-                },
-                "coordination_thresholds": {
-                    "min_coordinated_wallets": 5,
-                    "coordination_time_window": 30,
-                    "directional_bias_threshold": 0.8,
-                    "burst_intensity_threshold": 3.0
-                },
-                "fresh_wallet_thresholds": {
-                    "min_bet_size_usd": 2000,
-                    "api_lookback_limit": 100,
-                    "max_previous_trades": 0
-                }
-            },
-            "alerts": {
-                "discord_webhook": "",
-                "min_severity": "MEDIUM"
-            }
-        }
+            logger.error(f"Failed to load config from {config_path}: {e}")
+            logger.error("Config file is required. Please ensure insider_config.json exists and is valid.")
+            raise RuntimeError(f"Cannot load configuration file: {e}")
     
     async def start_monitoring(self):
         """Start the market monitoring system"""

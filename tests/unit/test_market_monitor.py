@@ -28,7 +28,7 @@ def mock_config():
                 'z_score_threshold': 3.0
             },
             'whale_thresholds': {
-                'whale_threshold_usd': 10000,
+                'whale_threshold_usd': 2000,
                 'coordination_threshold': 0.7,
                 'min_whales_for_coordination': 3
             },
@@ -128,12 +128,11 @@ class TestConfigurationLoading:
     
     @patch('pathlib.Path.exists')
     def test_load_config_file_not_found(self, mock_exists):
-        """Test config loading with missing file falls back to defaults"""
+        """Test config loading with missing file raises RuntimeError"""
         mock_exists.return_value = False
-        
-        monitor = MarketMonitor('nonexistent_config.json')
-        assert 'monitoring' in monitor.config
-        assert 'detection' in monitor.config
+
+        with pytest.raises(RuntimeError, match="Cannot load configuration file"):
+            monitor = MarketMonitor('nonexistent_config.json')
 
 
 class TestMarketDiscovery:
@@ -280,8 +279,10 @@ class TestWebSocketIntegration:
 class TestDataAPIIntegration:
     """Test Data API integration"""
 
-    def test_data_api_initialization(self):
+    @patch('market_monitor.MarketMonitor._load_config')
+    def test_data_api_initialization(self, mock_load_config, mock_config):
         """Test Data API client initialization"""
+        mock_load_config.return_value = mock_config
         monitor = MarketMonitor('test_config.json')
 
         assert hasattr(monitor, 'data_api')
@@ -401,11 +402,13 @@ class TestStatusReporting:
 
 class TestTradeHandling:
     """Test trade handling functionality"""
-    
-    def test_handle_realtime_trade(self):
+
+    @patch('market_monitor.MarketMonitor._load_config')
+    def test_handle_realtime_trade(self, mock_load_config, mock_config):
         """Test real-time trade handling"""
+        mock_load_config.return_value = mock_config
         monitor = MarketMonitor('test_config.json')
-        
+
         # Set up monitored market
         monitor.monitored_markets = {
             'test-market': {
@@ -413,7 +416,7 @@ class TestTradeHandling:
                 'volume24hr': 5000
             }
         }
-        
+
         trade_data = {
             'market': 'test-market',
             'price': 0.75,
@@ -421,10 +424,10 @@ class TestTradeHandling:
             'side': 'BUY',
             'timestamp': datetime.now().timestamp()
         }
-        
+
         # Test trade handling doesn't crash
         monitor._handle_realtime_trade(trade_data)
-        
+
         # Verify trade was stored
         assert 'test-market' in monitor.trade_history
         assert len(monitor.trade_history['test-market']) == 1
@@ -459,8 +462,10 @@ class TestErrorHandling:
             # Markets should remain empty
             assert len(monitor.monitored_markets) == 0
     
-    def test_handle_realtime_trade_invalid_data(self):
+    @patch('market_monitor.MarketMonitor._load_config')
+    def test_handle_realtime_trade_invalid_data(self, mock_load_config, mock_config):
         """Test trade handling with invalid data"""
+        mock_load_config.return_value = mock_config
         monitor = MarketMonitor('test_config.json')
 
         # Test with missing required fields

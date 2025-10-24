@@ -2,6 +2,7 @@
 Unit tests for FreshWalletDetector class.
 """
 import pytest
+from typing import Dict
 from unittest.mock import Mock, AsyncMock, patch
 from detection.fresh_wallet_detector import FreshWalletDetector
 from tests.test_utils import create_test_config
@@ -556,3 +557,225 @@ class TestFreshWalletDetector:
         # Should handle error gracefully and not crash
         # Behavior depends on implementation - either skip the wallet or return empty
         assert isinstance(result, list)  # Should still return a list
+
+
+class TestFreshWalletThresholdFiltering:
+    """Test fresh wallet detector threshold filtering and false positive prevention"""
+
+    def create_trade(self, price: float, size: float, maker: str, side: str = 'BUY') -> Dict:
+        """Helper to create a trade"""
+        return {
+            'price': price,
+            'size': size,
+            'side': side,
+            'maker': maker,
+            'timestamp': '2024-01-01T12:00:00Z',
+            'tx_hash': f'0x{hash(f"{price}{size}{maker}")}'
+        }
+
+    def get_test_config(self, **overrides):
+        """Helper to create complete test config with overrides"""
+        from tests.test_utils import create_test_config
+        config = create_test_config()
+        
+        # Apply overrides using dot notation
+        for key, value in overrides.items():
+            if '.' in key:
+                parts = key.split('.')
+                target = config
+                for part in parts[:-1]:
+                    target = target[part]
+                target[parts[-1]] = value
+        
+        return config
+
+    @pytest.mark.asyncio
+    async def test_bet_exactly_at_threshold_checked_for_freshness(self):
+        """Test trade exactly at min_bet_size_usd triggers freshness check"""
+        from detection.fresh_wallet_detector import FreshWalletDetector
+
+        config = self.get_test_config(**{'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000})
+
+        # Mock API and database
+        mock_api = AsyncMock()
+        mock_api.get_wallet_trades = AsyncMock(return_value=[])
+        mock_whale_tracker = AsyncMock()
+        mock_whale_tracker.get_whale = AsyncMock(return_value=None)
+
+        detector = FreshWalletDetector(config, mock_api, mock_whale_tracker)
+
+        # Trade worth exactly $2,000
+        trades = [self.create_trade(price=0.5, size=4000, maker='0xFRESH')]
+
+        results = await detector.detect_fresh_wallet_activity(trades)
+
+        assert len(results) == 1
+        assert results[0]['wallet_address'] == '0xFRESH'
+        assert results[0]['bet_size'] == 2000
+        mock_api.get_wallet_trades.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_bet_below_threshold_ignored(self):
+        """Test trade $1 below min_bet_size_usd is ignored (no API call)"""
+        from detection.fresh_wallet_detector import FreshWalletDetector
+
+        config = self.get_test_config(**{'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000})
+
+        mock_api = AsyncMock()
+        mock_api.get_wallet_trades = AsyncMock(return_value=[])
+        mock_whale_tracker = AsyncMock()
+        mock_whale_tracker.get_whale = AsyncMock(return_value=None)
+
+        detector = FreshWalletDetector(config, mock_api, mock_whale_tracker)
+
+        # Trade worth $1,999 (just below threshold)
+        trades = [self.create_trade(price=0.5, size=3998, maker='0xSMALL')]
+
+        results = await detector.detect_fresh_wallet_activity(trades)
+
+        assert len(results) == 0
+        mock_api.get_wallet_trades.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_bet_well_above_threshold_checked(self):
+        """Test trade well above threshold triggers freshness check"""
+        from detection.fresh_wallet_detector import FreshWalletDetector
+
+        config = self.get_test_config(**{'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000})
+
+        mock_api = AsyncMock()
+        mock_api.get_wallet_trades = AsyncMock(return_value=[])
+        mock_whale_tracker = AsyncMock()
+        mock_whale_tracker.get_whale = AsyncMock(return_value=None)
+
+        detector = FreshWalletDetector(config, mock_api, mock_whale_tracker)
+
+        # Trade worth $10,000
+        trades = [self.create_trade(price=0.5, size=20000, maker='0xBIGFRESH')]
+
+        results = await detector.detect_fresh_wallet_activity(trades)
+
+        assert len(results) == 1
+        assert results[0]['bet_size'] == 10000
+
+    @pytest.mark.asyncio
+    async def test_wallet_zero_trades_is_fresh(self):
+        """Test wallet with 0 previous trades when max_previous_trades=0 is fresh"""
+        from detection.fresh_wallet_detector import FreshWalletDetector
+
+        config = self.get_test_config(**{
+            'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000,
+            'detection.fresh_wallet_thresholds.max_previous_trades': 0
+        })
+
+        mock_api = AsyncMock()
+        mock_api.get_wallet_trades = AsyncMock(return_value=[])
+        mock_whale_tracker = AsyncMock()
+        mock_whale_tracker.get_whale = AsyncMock(return_value=None)
+
+        detector = FreshWalletDetector(config, mock_api, mock_whale_tracker)
+
+        trades = [self.create_trade(price=0.5, size=10000, maker='0xNEW')]
+
+        results = await detector.detect_fresh_wallet_activity(trades)
+
+        assert len(results) == 1
+        assert results[0]['previous_trade_count'] == 0
+
+    @pytest.mark.asyncio
+    async def test_wallet_one_trade_not_fresh_when_max_zero(self):
+        """Test wallet with 1 previous trade when max_previous_trades=0 is NOT fresh"""
+        from detection.fresh_wallet_detector import FreshWalletDetector
+
+        config = self.get_test_config(**{
+            'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000,
+            'detection.fresh_wallet_thresholds.max_previous_trades': 0
+        })
+
+        mock_api = AsyncMock()
+        mock_api.get_wallet_trades = AsyncMock(return_value=[{'id': '1'}])
+        mock_whale_tracker = AsyncMock()
+        mock_whale_tracker.get_whale = AsyncMock(return_value=None)
+
+        detector = FreshWalletDetector(config, mock_api, mock_whale_tracker)
+
+        trades = [self.create_trade(price=0.5, size=10000, maker='0xOLD')]
+
+        results = await detector.detect_fresh_wallet_activity(trades)
+
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_wallet_within_max_trades_is_fresh(self):
+        """Test wallet with 5 trades when max_previous_trades=10 is fresh"""
+        from detection.fresh_wallet_detector import FreshWalletDetector
+
+        config = self.get_test_config(**{
+            'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000,
+            'detection.fresh_wallet_thresholds.max_previous_trades': 10
+        })
+
+        mock_api = AsyncMock()
+        mock_api.get_wallet_trades = AsyncMock(return_value=[{'id': str(i)} for i in range(5)])
+        mock_whale_tracker = AsyncMock()
+        mock_whale_tracker.get_whale = AsyncMock(return_value=None)
+
+        detector = FreshWalletDetector(config, mock_api, mock_whale_tracker)
+
+        trades = [self.create_trade(price=0.5, size=10000, maker='0xSOMEWHATNEW')]
+
+        results = await detector.detect_fresh_wallet_activity(trades)
+
+        assert len(results) == 1
+        assert results[0]['previous_trade_count'] == 5
+
+    @pytest.mark.asyncio
+    async def test_wallet_exceeds_max_trades_not_fresh(self):
+        """Test wallet with 15 trades when max_previous_trades=10 is NOT fresh"""
+        from detection.fresh_wallet_detector import FreshWalletDetector
+
+        config = self.get_test_config(**{
+            'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000,
+            'detection.fresh_wallet_thresholds.max_previous_trades': 10
+        })
+
+        mock_api = AsyncMock()
+        mock_api.get_wallet_trades = AsyncMock(return_value=[{'id': str(i)} for i in range(15)])
+        mock_whale_tracker = AsyncMock()
+        mock_whale_tracker.get_whale = AsyncMock(return_value=None)
+
+        detector = FreshWalletDetector(config, mock_api, mock_whale_tracker)
+
+        trades = [self.create_trade(price=0.5, size=10000, maker='0xESTABLISHED')]
+
+        results = await detector.detect_fresh_wallet_activity(trades)
+
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_database_caching_prevents_duplicate_api_calls(self):
+        """Test second check of same wallet uses database cache (no API call)"""
+        from detection.fresh_wallet_detector import FreshWalletDetector
+
+        config = self.get_test_config(**{'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000})
+
+        mock_api = AsyncMock()
+        mock_api.get_wallet_trades = AsyncMock(return_value=[])
+
+        # Mock database with cached result
+        mock_whale_data = AsyncMock()
+        mock_whale_data.verified_fresh = True
+        mock_whale_data.is_fresh_wallet = True
+        mock_whale_data.trade_count = 0
+
+        mock_whale_tracker = AsyncMock()
+        mock_whale_tracker.get_whale = AsyncMock(return_value=mock_whale_data)
+
+        detector = FreshWalletDetector(config, mock_api, mock_whale_tracker)
+
+        # First check
+        trades = [self.create_trade(price=0.5, size=10000, maker='0xCACHED')]
+        results1 = await detector.detect_fresh_wallet_activity(trades)
+
+        assert len(results1) == 1
+        mock_api.get_wallet_trades.assert_not_called()

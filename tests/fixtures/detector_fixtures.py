@@ -16,7 +16,7 @@ class DetectorFactory:
     
     @staticmethod
     def create_whale_detector(
-        whale_threshold_usd: int = 15000,
+        whale_threshold_usd: int = 2000,
         coordination_threshold: float = 0.8,
         min_whales_for_coordination: int = 3
     ) -> WhaleDetector:

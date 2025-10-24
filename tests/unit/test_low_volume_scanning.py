@@ -46,7 +46,7 @@ def get_complete_test_config(**overrides):
                 'z_score_threshold': 3.0
             },
             'whale_thresholds': {
-                'whale_threshold_usd': 10000,
+                'whale_threshold_usd': 2000,
                 'coordination_threshold': 0.7,
                 'min_whales_for_coordination': 3
             },
@@ -633,3 +633,410 @@ class TestMonitoringModes:
         else:  # expected_high only
             assert settings.monitoring.enable_low_volume_scanning is False
             assert settings.monitoring.monitor_all_markets is False
+
+
+class TestWhaleTradeFiltering:
+    """Test whale detector properly filters trades by whale_threshold_usd"""
+
+    def create_trade(self, price: float, size: float, side: str = 'BUY', maker: str = '0xABCD') -> Dict:
+        """Helper to create a trade with specific USD volume"""
+        return {
+            'price': price,
+            'size': size,
+            'side': side,
+            'maker': maker,
+            'timestamp': '2024-01-01T12:00:00Z',
+            'tx_hash': f'0x{hash(f"{price}{size}")}'
+        }
+
+    def test_trade_exactly_at_threshold_triggers_detection(self):
+        """Test trade exactly at whale_threshold_usd is detected as whale trade"""
+        from detection.whale_detector import WhaleDetector
+
+        config = get_complete_test_config(**{'detection.whale_thresholds.whale_threshold_usd': 10000})
+        detector = WhaleDetector(config)
+
+        # Create 3 whales on same side for significant activity
+        trades = [
+            self.create_trade(price=0.5, size=20000, maker='0xWHALE1'),   # $10k
+            self.create_trade(price=0.5, size=20000, maker='0xWHALE2'),   # $10k
+            self.create_trade(price=0.5, size=20000, maker='0xWHALE3'),   # $10k
+        ]
+
+        result = detector.detect_whale_activity(trades)
+
+        assert result['anomaly'] is True
+        assert result['whale_count'] == 3
+        assert result['largest_whale_volume'] >= 10000
+
+    def test_trade_below_threshold_ignored(self):
+        """Test trade $1 below threshold is ignored"""
+        from detection.whale_detector import WhaleDetector
+
+        config = get_complete_test_config(**{'detection.whale_thresholds.whale_threshold_usd': 10000})
+        detector = WhaleDetector(config)
+
+        # Create trade worth $9,999 (just below threshold)
+        trades = [self.create_trade(price=0.5, size=19998)]  # 0.5 * 19998 = $9,999
+
+        result = detector.detect_whale_activity(trades)
+
+        assert result['anomaly'] is False
+        assert result['whale_count'] == 0
+
+    def test_trade_well_above_threshold_triggers_detection(self):
+        """Test trade well above threshold triggers detection"""
+        from detection.whale_detector import WhaleDetector
+
+        config = get_complete_test_config(**{'detection.whale_thresholds.whale_threshold_usd': 10000})
+        detector = WhaleDetector(config)
+
+        # Create 3 whales for significant activity
+        trades = [
+            self.create_trade(price=0.5, size=100000, maker='0xBIGWHALE1'),  # $50k
+            self.create_trade(price=0.5, size=100000, maker='0xBIGWHALE2'),  # $50k
+            self.create_trade(price=0.5, size=100000, maker='0xBIGWHALE3'),  # $50k
+        ]
+
+        result = detector.detect_whale_activity(trades)
+
+        assert result['anomaly'] is True
+        assert result['whale_count'] == 3
+        assert result['largest_whale_volume'] >= 50000
+
+    def test_mixed_trades_only_analyzes_whales(self):
+        """Test mixed trades (some above/below threshold) only counts whales"""
+        from detection.whale_detector import WhaleDetector
+
+        config = get_complete_test_config(**{'detection.whale_thresholds.whale_threshold_usd': 10000})
+        detector = WhaleDetector(config)
+
+        trades = [
+            self.create_trade(price=0.5, size=100000, maker='0xWHALE1'),  # $50k - whale
+            self.create_trade(price=0.5, size=2000, maker='0xSMALL1'),    # $1k - not whale
+            self.create_trade(price=0.5, size=40000, maker='0xWHALE2'),   # $20k - whale
+            self.create_trade(price=0.5, size=500, maker='0xSMALL2'),     # $250 - not whale
+            self.create_trade(price=0.5, size=50000, maker='0xWHALE3'),   # $25k - whale (3rd for anomaly)
+        ]
+
+        result = detector.detect_whale_activity(trades)
+
+        assert result['anomaly'] is True
+        assert result['whale_count'] == 3  # Only 3 whales
+        assert result['total_whale_volume'] >= 95000  # $50k + $20k + $25k
+
+    def test_different_threshold_values_respected(self):
+        """Test detector respects different whale_threshold_usd config values"""
+        from detection.whale_detector import WhaleDetector
+
+        # Test with $5,000 threshold - $6,000 trades should be whales
+        config_5k = get_complete_test_config(**{'detection.whale_thresholds.whale_threshold_usd': 5000})
+        detector_5k = WhaleDetector(config_5k)
+
+        trades = [
+            self.create_trade(price=0.5, size=12000, maker='0xW1'),  # $6k
+            self.create_trade(price=0.5, size=12000, maker='0xW2'),  # $6k
+            self.create_trade(price=0.5, size=12000, maker='0xW3'),  # $6k
+        ]
+
+        result_5k = detector_5k.detect_whale_activity(trades)
+        assert result_5k['anomaly'] is True  # Above $5k threshold
+        assert result_5k['whale_count'] == 3
+
+        # Test with $25,000 threshold - same trades should NOT be whales
+        config_25k = get_complete_test_config(**{'detection.whale_thresholds.whale_threshold_usd': 25000})
+        detector_25k = WhaleDetector(config_25k)
+
+        result_25k = detector_25k.detect_whale_activity(trades)
+        assert result_25k['anomaly'] is False  # Below $25k threshold
+        assert result_25k['whale_count'] == 0
+
+    def test_whale_count_matches_trades_above_threshold(self):
+        """Verify whale_count matches number of unique wallets above threshold"""
+        from detection.whale_detector import WhaleDetector
+
+        config = get_complete_test_config(**{'detection.whale_thresholds.whale_threshold_usd': 10000})
+        detector = WhaleDetector(config)
+
+        trades = [
+            self.create_trade(price=0.5, size=50000, maker='0xWHALE1'),   # $25k
+            self.create_trade(price=0.5, size=30000, maker='0xWHALE1'),   # $15k (same wallet)
+            self.create_trade(price=0.5, size=40000, maker='0xWHALE2'),   # $20k
+            self.create_trade(price=0.5, size=60000, maker='0xWHALE3'),   # $30k
+        ]
+
+        result = detector.detect_whale_activity(trades)
+
+        assert result['whale_count'] == 3  # 3 unique whale wallets
+
+
+class TestLowVolumeWithRealTradeData:
+    """Integration tests with realistic trade data through the full analysis pipeline"""
+
+    def create_trade(self, price: float, size: float, maker: str, side: str = 'BUY') -> Dict:
+        """Helper to create realistic trade data"""
+        return {
+            'price': price,
+            'size': size,
+            'side': side,
+            'maker': maker,
+            'timestamp': '2024-01-01T12:00:00Z',
+            'tx_hash': f'0x{hash(f"{price}{size}{maker}")}'
+        }
+
+    @pytest.mark.asyncio
+    async def test_low_volume_whale_above_threshold_creates_alert(self):
+        """Test whale trade above threshold in low-volume market creates alert"""
+        config = get_complete_test_config(**{
+            'monitoring.whale_escalation_enabled': True,
+            'detection.whale_thresholds.whale_threshold_usd': 10000
+        })
+
+        with patch('market_monitor.MarketMonitor._load_config') as mock_load:
+            with patch('market_monitor.DatabaseManager'):
+                with patch('market_monitor.DataAPIClient'):
+                    mock_load.return_value = config
+                    monitor = MarketMonitor()
+
+                    # Mock whale detector to return anomaly
+                    monitor.whale_detector.detect_whale_activity = Mock(return_value={
+                        'anomaly': True,
+                        'whale_count': 3,
+                        'total_whale_volume': 75000
+                    })
+
+                    monitor._get_market_trades = AsyncMock(return_value=[
+                        self.create_trade(price=0.5, size=50000, maker='0xWHALE1'),
+                        self.create_trade(price=0.5, size=50000, maker='0xWHALE2'),
+                        self.create_trade(price=0.5, size=50000, maker='0xWHALE3'),
+                    ])
+                    monitor._escalate_market = AsyncMock()
+                    monitor._determine_severity = Mock(return_value=Mock(value='HIGH'))
+                    monitor._create_alert = AsyncMock(return_value={
+                        'market_id': 'test',
+                        'alert_type': 'WHALE_ACTIVITY',
+                        'source': 'low_volume_scan'
+                    })
+                    monitor._calculate_anomaly_confidence = Mock(return_value=8.0)
+                    monitor.alert_manager.send_alert = AsyncMock(return_value=True)
+                    monitor._track_whales_from_alert = AsyncMock()
+                    monitor._initialize_outcome_tracking = AsyncMock()
+                    monitor.fresh_wallet_detector.detect_fresh_wallet_activity = AsyncMock(return_value=[])
+
+                    market_data = {'conditionId': 'test', 'question': 'Test Market'}
+
+                    alerts_sent = await monitor._analyze_market_for_whales('test', market_data)
+
+                    assert alerts_sent == 1
+                    monitor.alert_manager.send_alert.assert_called_once()
+                    monitor._escalate_market.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_low_volume_whale_below_threshold_no_alert(self):
+        """Test whale trade below threshold in low-volume market creates no alert"""
+        config = get_complete_test_config(**{
+            'monitoring.whale_escalation_enabled': True,
+            'detection.whale_thresholds.whale_threshold_usd': 10000
+        })
+
+        with patch('market_monitor.MarketMonitor._load_config') as mock_load:
+            with patch('market_monitor.DatabaseManager'):
+                with patch('market_monitor.DataAPIClient'):
+                    mock_load.return_value = config
+                    monitor = MarketMonitor()
+
+                    # Mock dependencies
+                    monitor._get_market_trades = AsyncMock(return_value=[
+                        self.create_trade(price=0.5, size=15000, maker='0xSMALL')  # $7.5k - below threshold
+                    ])
+                    monitor._escalate_market = AsyncMock()
+                    monitor.alert_manager.send_alert = AsyncMock(return_value=True)
+                    monitor.fresh_wallet_detector.detect_fresh_wallet_activity = AsyncMock(return_value=[])
+
+                    market_data = {'conditionId': 'test', 'question': 'Test Market'}
+
+                    alerts_sent = await monitor._analyze_market_for_whales('test', market_data)
+
+                    assert alerts_sent == 0
+                    monitor.alert_manager.send_alert.assert_not_called()
+                    monitor._escalate_market.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_low_volume_fresh_wallet_large_bet_creates_alert(self):
+        """Test fresh wallet with large bet in low-volume market creates alert"""
+        config = get_complete_test_config(**{
+            'monitoring.whale_escalation_enabled': True,
+            'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000
+        })
+
+        with patch('market_monitor.MarketMonitor._load_config') as mock_load:
+            with patch('market_monitor.DatabaseManager'):
+                with patch('market_monitor.DataAPIClient'):
+                    mock_load.return_value = config
+                    monitor = MarketMonitor()
+
+                    # Mock fresh wallet detection
+                    fresh_wallet_result = {
+                        'anomaly': True,
+                        'wallet_address': '0xFRESH',
+                        'bet_size': 5000,
+                        'side': 'BUY',
+                        'previous_trade_count': 0
+                    }
+
+                    monitor._get_market_trades = AsyncMock(return_value=[
+                        self.create_trade(price=0.5, size=10000, maker='0xFRESH')  # $5k
+                    ])
+                    monitor._escalate_market = AsyncMock()
+                    monitor.whale_detector.detect_whale_activity = Mock(return_value={'anomaly': False})
+                    monitor.fresh_wallet_detector.detect_fresh_wallet_activity = AsyncMock(
+                        return_value=[fresh_wallet_result]
+                    )
+                    monitor._create_fresh_wallet_alert = AsyncMock(return_value={
+                        'alert_type': 'FRESH_WALLET',
+                        'source': 'low_volume_scan'
+                    })
+                    monitor.alert_manager.send_alert = AsyncMock(return_value=True)
+                    monitor._track_whales_from_alert = AsyncMock()
+                    monitor._initialize_outcome_tracking = AsyncMock()
+
+                    market_data = {'conditionId': 'test', 'question': 'Test Market'}
+
+                    alerts_sent = await monitor._analyze_market_for_whales('test', market_data)
+
+                    assert alerts_sent == 1
+                    monitor.alert_manager.send_alert.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_low_volume_fresh_wallet_small_bet_no_alert(self):
+        """Test fresh wallet with small bet in low-volume market creates no alert"""
+        config = get_complete_test_config(**{
+            'monitoring.whale_escalation_enabled': True,
+            'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000
+        })
+
+        with patch('market_monitor.MarketMonitor._load_config') as mock_load:
+            with patch('market_monitor.DatabaseManager'):
+                with patch('market_monitor.DataAPIClient'):
+                    mock_load.return_value = config
+                    monitor = MarketMonitor()
+
+                    monitor._get_market_trades = AsyncMock(return_value=[
+                        self.create_trade(price=0.5, size=3000, maker='0xFRESH')  # $1.5k - below threshold
+                    ])
+                    monitor.whale_detector.detect_whale_activity = Mock(return_value={'anomaly': False})
+                    monitor.fresh_wallet_detector.detect_fresh_wallet_activity = AsyncMock(return_value=[])
+                    monitor.alert_manager.send_alert = AsyncMock()
+
+                    market_data = {'conditionId': 'test', 'question': 'Test Market'}
+
+                    alerts_sent = await monitor._analyze_market_for_whales('test', market_data)
+
+                    assert alerts_sent == 0
+                    monitor.alert_manager.send_alert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_low_volume_established_whale_only_whale_alert(self):
+        """Test established wallet large bet only triggers whale alert, not fresh wallet"""
+        config = get_complete_test_config(**{
+            'monitoring.whale_escalation_enabled': True,
+            'detection.whale_thresholds.whale_threshold_usd': 10000,
+            'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000
+        })
+
+        with patch('market_monitor.MarketMonitor._load_config') as mock_load:
+            with patch('market_monitor.DatabaseManager'):
+                with patch('market_monitor.DataAPIClient'):
+                    mock_load.return_value = config
+                    monitor = MarketMonitor()
+
+                    # Mock whale detector to return anomaly
+                    monitor.whale_detector.detect_whale_activity = Mock(return_value={
+                        'anomaly': True,
+                        'whale_count': 3,
+                        'total_whale_volume': 150000
+                    })
+
+                    monitor._get_market_trades = AsyncMock(return_value=[
+                        self.create_trade(price=0.5, size=100000, maker='0xESTABLISHED1'),
+                        self.create_trade(price=0.5, size=100000, maker='0xESTABLISHED2'),
+                        self.create_trade(price=0.5, size=100000, maker='0xESTABLISHED3'),
+                    ])
+                    monitor._escalate_market = AsyncMock()
+                    monitor._determine_severity = Mock(return_value=Mock(value='HIGH'))
+                    monitor._create_alert = AsyncMock(return_value={
+                        'market_id': 'test',
+                        'alert_type': 'WHALE_ACTIVITY'
+                    })
+                    monitor._calculate_anomaly_confidence = Mock(return_value=8.0)
+                    monitor.alert_manager.send_alert = AsyncMock(return_value=True)
+                    monitor._track_whales_from_alert = AsyncMock()
+                    monitor._initialize_outcome_tracking = AsyncMock()
+                    # Fresh wallet detector returns empty (wallets have history)
+                    monitor.fresh_wallet_detector.detect_fresh_wallet_activity = AsyncMock(return_value=[])
+
+                    market_data = {'conditionId': 'test', 'question': 'Test Market'}
+
+                    alerts_sent = await monitor._analyze_market_for_whales('test', market_data)
+
+                    # Should have 1 alert (whale only, not fresh wallet)
+                    assert alerts_sent == 1
+                    assert monitor.alert_manager.send_alert.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_low_volume_whale_and_fresh_wallet_both_detected(self):
+        """Test market with both whale and fresh wallet generates 2 alerts"""
+        config = get_complete_test_config(**{
+            'monitoring.whale_escalation_enabled': True,
+            'detection.whale_thresholds.whale_threshold_usd': 10000,
+            'detection.fresh_wallet_thresholds.min_bet_size_usd': 2000
+        })
+
+        with patch('market_monitor.MarketMonitor._load_config') as mock_load:
+            with patch('market_monitor.DatabaseManager'):
+                with patch('market_monitor.DataAPIClient'):
+                    mock_load.return_value = config
+                    monitor = MarketMonitor()
+
+                    trades = [
+                        self.create_trade(price=0.5, size=100000, maker='0xFRESHWHALE1'),
+                        self.create_trade(price=0.5, size=100000, maker='0xFRESHWHALE2'),
+                        self.create_trade(price=0.5, size=100000, maker='0xFRESHWHALE3'),
+                    ]
+
+                    # Mock whale detector to return anomaly
+                    monitor.whale_detector.detect_whale_activity = Mock(return_value={
+                        'anomaly': True,
+                        'whale_count': 3,
+                        'total_whale_volume': 150000
+                    })
+
+                    monitor._get_market_trades = AsyncMock(return_value=trades)
+                    monitor._escalate_market = AsyncMock()
+                    monitor._determine_severity = Mock(return_value=Mock(value='HIGH'))
+                    monitor._create_alert = AsyncMock(return_value={
+                        'market_id': 'test',
+                        'alert_type': 'WHALE_ACTIVITY'
+                    })
+                    monitor._calculate_anomaly_confidence = Mock(return_value=8.0)
+                    monitor._create_fresh_wallet_alert = AsyncMock(return_value={
+                        'alert_type': 'FRESH_WALLET'
+                    })
+                    monitor.alert_manager.send_alert = AsyncMock(return_value=True)
+                    monitor._track_whales_from_alert = AsyncMock()
+                    monitor._initialize_outcome_tracking = AsyncMock()
+                    # Fresh wallet detector finds the wallet is fresh
+                    monitor.fresh_wallet_detector.detect_fresh_wallet_activity = AsyncMock(return_value=[{
+                        'anomaly': True,
+                        'wallet_address': '0xFRESHWHALE1',
+                        'bet_size': 50000,
+                        'previous_trade_count': 0
+                    }])
+
+                    market_data = {'conditionId': 'test', 'question': 'Test Market'}
+
+                    alerts_sent = await monitor._analyze_market_for_whales('test', market_data)
+
+                    # Should have 2 alerts (whale + fresh wallet)
+                    assert alerts_sent == 2
+                    assert monitor.alert_manager.send_alert.call_count == 2
