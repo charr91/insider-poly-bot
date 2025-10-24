@@ -217,12 +217,6 @@ Use for:
 
 ## 📝 Utility Scripts
 
-### Debug Trade Data
-```bash
-# Check if trade data is being received correctly
-python debug_trades.py
-```
-
 ### Market Discovery Test
 ```bash
 # Test market discovery without full monitoring
