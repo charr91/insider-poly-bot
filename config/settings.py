@@ -15,7 +15,11 @@ logger = logging.getLogger(__name__)
 class MonitoringSettings:
     """Settings for market monitoring"""
     volume_threshold: float = 1000
-    max_markets: int = 50
+    max_markets: Optional[int] = 50
+    enable_low_volume_scanning: bool = True
+    max_low_volume_markets: Optional[int] = 200
+    whale_escalation_enabled: bool = True
+    monitor_all_markets: bool = False
     check_interval: int = 60
     sort_by_volume: bool = True
     market_discovery_interval: int = 300  # 5 minutes
@@ -109,10 +113,14 @@ class Settings:
     def _init_monitoring_settings(self) -> MonitoringSettings:
         """Initialize monitoring settings"""
         monitoring_config = self.config.get('monitoring', {})
-        
+
         return MonitoringSettings(
             volume_threshold=monitoring_config.get('volume_threshold', 1000),
             max_markets=monitoring_config.get('max_markets', 50),
+            enable_low_volume_scanning=monitoring_config.get('enable_low_volume_scanning', True),
+            max_low_volume_markets=monitoring_config.get('max_low_volume_markets', 200),
+            whale_escalation_enabled=monitoring_config.get('whale_escalation_enabled', True),
+            monitor_all_markets=monitoring_config.get('monitor_all_markets', False),
             check_interval=monitoring_config.get('check_interval', 60),
             sort_by_volume=monitoring_config.get('sort_by_volume', True),
             market_discovery_interval=monitoring_config.get('market_discovery_interval', 300),
@@ -201,6 +209,10 @@ class Settings:
             'monitoring': {
                 'volume_threshold': self.monitoring.volume_threshold,
                 'max_markets': self.monitoring.max_markets,
+                'enable_low_volume_scanning': self.monitoring.enable_low_volume_scanning,
+                'max_low_volume_markets': self.monitoring.max_low_volume_markets,
+                'whale_escalation_enabled': self.monitoring.whale_escalation_enabled,
+                'monitor_all_markets': self.monitoring.monitor_all_markets,
                 'check_interval': self.monitoring.check_interval,
                 'sort_by_volume': self.monitoring.sort_by_volume
             },
@@ -225,13 +237,16 @@ class Settings:
     def validate_settings(self) -> List[str]:
         """Validate settings and return list of issues"""
         issues = []
-        
+
         # Check monitoring settings
         if self.monitoring.volume_threshold <= 0:
             issues.append("Volume threshold must be positive")
-        
-        if self.monitoring.max_markets <= 0:
-            issues.append("Max markets must be positive")
+
+        if self.monitoring.max_markets is not None and self.monitoring.max_markets < 0:
+            issues.append("Max markets must be non-negative or None (unlimited)")
+
+        if self.monitoring.max_low_volume_markets is not None and self.monitoring.max_low_volume_markets < 0:
+            issues.append("Max low volume markets must be non-negative or None (unlimited)")
         
         # Check detection thresholds
         if self.detection.volume_spike_multiplier <= 1:
@@ -254,7 +269,18 @@ class Settings:
     def log_settings(self):
         """Log current settings"""
         logger.info("⚙️ Current Settings:")
-        logger.info(f"  📊 Monitoring: {self.monitoring.max_markets} markets, min volume ${self.monitoring.volume_threshold}")
+
+        # Monitoring mode description
+        if self.monitoring.monitor_all_markets:
+            mode_desc = "ALL markets (experimental)"
+        elif self.monitoring.enable_low_volume_scanning:
+            mode_desc = f"Hybrid: {self.monitoring.max_markets or 'unlimited'} high-vol + {self.monitoring.max_low_volume_markets or 'unlimited'} low-vol"
+        else:
+            mode_desc = f"{self.monitoring.max_markets or 'unlimited'} high-volume only"
+
+        logger.info(f"  📊 Monitoring: {mode_desc}, min volume ${self.monitoring.volume_threshold}")
+        if self.monitoring.enable_low_volume_scanning:
+            logger.info(f"  🔺 Whale Escalation: {'Enabled' if self.monitoring.whale_escalation_enabled else 'Disabled'}")
         logger.info(f"  🔍 Detection: Volume {self.detection.volume_spike_multiplier}x, Whale ${self.detection.whale_threshold_usd}")
         logger.info(f"  🔔 Alerts: Min severity {self.alerts.min_severity}, Discord {'✅' if self.alerts.discord_webhook else '❌'}")
         logger.info(f"  🌐 API: {'Simulation' if self.api.simulation_mode else 'Live'} mode")

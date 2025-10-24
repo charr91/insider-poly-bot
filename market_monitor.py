@@ -65,7 +65,9 @@ class MarketMonitor:
         # Note: fresh_wallet_detector initialization deferred until after whale_tracker is created
 
         # Market data storage (must be initialized before AlertManager)
-        self.monitored_markets = {}
+        self.monitored_markets = {}  # High-volume markets (full analysis)
+        self.low_volume_markets = {}  # Low-volume markets (whale-only scanning)
+        self.escalated_markets = set()  # Markets escalated from low-volume to full monitoring
         self.market_baselines = {}
         self.trade_history = {}
         self.token_to_outcome = {}  # Maps token ID to "Yes" or "No"
@@ -183,7 +185,7 @@ class MarketMonitor:
             return
 
         self.running = True
-        
+
         # Start concurrent tasks
         tasks = [
             asyncio.create_task(self._market_discovery_loop(), name="market_discovery"),
@@ -193,6 +195,11 @@ class MarketMonitor:
             asyncio.create_task(self._trade_polling_loop(), name="trade_polling"),  # Real-time trade polling
             asyncio.create_task(self._outcome_update_loop(), name="outcome_updates")  # Outcome tracking updates
         ]
+
+        # Add low-volume scanning task if enabled
+        if self.settings.monitoring.enable_low_volume_scanning:
+            tasks.append(asyncio.create_task(self._low_volume_scan_loop(), name="low_volume_scan"))
+            logger.info("🔍 Low-volume whale scanning enabled")
 
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -279,7 +286,7 @@ class MarketMonitor:
             logger.error(f"Error discovering markets: {e}", exc_info=True)
 
     async def _process_markets_response(self, resp, volume_threshold, max_markets, sort_by_volume):
-        """Process the markets API response"""
+        """Process the markets API response and categorize into high/low volume"""
         if resp.status != 200:
             logger.error(f"Failed to fetch markets: HTTP {resp.status}")
             return
@@ -304,53 +311,90 @@ class MarketMonitor:
             except (ValueError, TypeError):
                 logger.warning("Could not sort markets by volume")
 
-        # Filter and update monitored markets
-        new_market_ids = []
-        updated_markets = {}
+        # Determine monitoring mode
+        monitor_all = self.settings.monitoring.monitor_all_markets
+        enable_low_volume = self.settings.monitoring.enable_low_volume_scanning
+        max_high_volume = self.settings.monitoring.max_markets
+        max_low_volume = self.settings.monitoring.max_low_volume_markets
+
+        # Filter and categorize markets
+        updated_high_volume_markets = {}
+        updated_low_volume_markets = {}
         websocket_token_ids = []
+        high_volume_count = 0
+        low_volume_count = 0
 
         for market in markets:
             try:
                 condition_id = market.get('conditionId', '')
                 volume = float(market.get('volume24hr', 0))
 
-                if condition_id and volume >= volume_threshold:
-                    new_market_ids.append(condition_id)
-                    updated_markets[condition_id] = market
+                if not condition_id:
+                    continue
 
-                    # Collect token IDs for WebSocket subscription and outcome mapping
-                    token_ids_raw = market.get('clobTokenIds', [])
-                    if token_ids_raw:
-                        try:
-                            # Parse JSON string if needed
-                            if isinstance(token_ids_raw, str):
-                                token_ids = json.loads(token_ids_raw)
-                            else:
-                                token_ids = token_ids_raw
+                # Process token IDs for all markets
+                token_ids_raw = market.get('clobTokenIds', [])
+                if token_ids_raw:
+                    try:
+                        if isinstance(token_ids_raw, str):
+                            token_ids = json.loads(token_ids_raw)
+                        else:
+                            token_ids = token_ids_raw
 
-                            if isinstance(token_ids, list):
-                                websocket_token_ids.extend(token_ids[:2])  # Take first 2 from each market
+                        if isinstance(token_ids, list) and len(token_ids) >= 2:
+                            self.token_to_outcome[token_ids[0]] = "Yes"
+                            self.token_to_outcome[token_ids[1]] = "No"
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.debug(f"Could not parse token IDs for {condition_id}: {e}")
 
-                                # Map token IDs to outcomes (assuming first token is "Yes", second is "No")
-                                if len(token_ids) >= 2:
-                                    self.token_to_outcome[token_ids[0]] = "Yes"
-                                    self.token_to_outcome[token_ids[1]] = "No"
-                        except (json.JSONDecodeError, TypeError) as e:
-                            logger.debug(f"Could not parse token IDs for {condition_id}: {e}")
+                # Categorize market based on mode
+                if monitor_all:
+                    # Monitor ALL markets with full analysis
+                    if max_high_volume is None or high_volume_count < max_high_volume:
+                        updated_high_volume_markets[condition_id] = market
+                        high_volume_count += 1
 
-                    # Initialize baseline if new market
-                    if condition_id not in self.monitored_markets:
-                        await self._initialize_market_baseline(condition_id, market)
+                        # Add to websocket and initialize baseline
+                        if token_ids_raw:
+                            websocket_token_ids.extend(token_ids[:2] if isinstance(token_ids_raw, list) else [])
+                        if condition_id not in self.monitored_markets and condition_id not in self.escalated_markets:
+                            await self._initialize_market_baseline(condition_id, market)
+
+                elif volume >= volume_threshold:
+                    # High-volume market
+                    if max_high_volume is None or high_volume_count < max_high_volume:
+                        updated_high_volume_markets[condition_id] = market
+                        high_volume_count += 1
+
+                        # Add to websocket and initialize baseline
+                        if token_ids_raw:
+                            websocket_token_ids.extend(token_ids[:2] if isinstance(token_ids_raw, list) else [])
+                        if condition_id not in self.monitored_markets and condition_id not in self.escalated_markets:
+                            await self._initialize_market_baseline(condition_id, market)
+
+                elif enable_low_volume:
+                    # Low-volume market (whale scanning only)
+                    if max_low_volume is None or low_volume_count < max_low_volume:
+                        updated_low_volume_markets[condition_id] = market
+                        low_volume_count += 1
 
             except (KeyError, ValueError, TypeError) as e:
+                logger.debug(f"Error processing market: {e}")
                 continue
 
-        # Update monitored markets
-        old_count = len(self.monitored_markets)
-        self.monitored_markets = updated_markets
-        new_count = len(self.monitored_markets)
+        # Update market dictionaries
+        old_high_count = len(self.monitored_markets)
+        old_low_count = len(self.low_volume_markets)
+        self.monitored_markets = updated_high_volume_markets
+        self.low_volume_markets = updated_low_volume_markets
 
-        logger.info(f"📊 Monitoring {new_count} markets (was {old_count})")
+        # Log discovery results
+        if monitor_all:
+            logger.info(f"📊 Monitoring ALL {len(self.monitored_markets)} markets (was {old_high_count})")
+        else:
+            logger.info(f"📊 High-volume: {len(self.monitored_markets)} markets (was {old_high_count})")
+            if enable_low_volume:
+                logger.info(f"📊 Low-volume: {len(self.low_volume_markets)} markets (was {old_low_count})")
 
         # Update WebSocket subscriptions (optional - fallback to Data API if fails)
         try:
@@ -382,7 +426,110 @@ class MarketMonitor:
         
         except Exception as e:
             logger.error(f"Failed to initialize baseline for {market_id}: {e}")
-    
+
+    async def _escalate_market(self, market_id: str, market_data: Dict):
+        """
+        Permanently promote a low-volume market to full monitoring.
+        Called when whale activity is detected in a low-volume market.
+
+        Args:
+            market_id: Market identifier
+            market_data: Market metadata
+        """
+        try:
+            market_name = market_data.get('question', 'Unknown')[:50]
+            logger.info(f"🔺 ESCALATING market to full monitoring: {market_name}...")
+
+            # Move from low_volume_markets to monitored_markets
+            if market_id in self.low_volume_markets:
+                self.monitored_markets[market_id] = self.low_volume_markets[market_id]
+                del self.low_volume_markets[market_id]
+            else:
+                # Market may have been already escalated or is new
+                self.monitored_markets[market_id] = market_data
+
+            # Track escalation (permanent)
+            self.escalated_markets.add(market_id)
+
+            # Initialize baseline for full analysis if not already present
+            if market_id not in self.market_baselines:
+                await self._initialize_market_baseline(market_id, market_data)
+
+            logger.info(f"✅ Market escalated: {market_name}... (now has full analysis)")
+
+        except Exception as e:
+            logger.error(f"Failed to escalate market {market_id}: {e}", exc_info=True)
+
+    async def _analyze_market_for_whales(self, market_id: str, market_data: Dict) -> int:
+        """
+        Lightweight analysis for low-volume markets - only whale and fresh wallet detection.
+        Escalates market to full monitoring if whales are detected.
+
+        Args:
+            market_id: Market identifier
+            market_data: Market metadata
+
+        Returns:
+            int: Number of alerts successfully sent
+        """
+        try:
+            # Get combined trade data
+            trades = await self._get_market_trades(market_id)
+
+            if not trades:
+                return 0
+
+            # Run only whale and fresh wallet detectors (lightweight)
+            whale_analysis = self.whale_detector.detect_whale_activity(trades)
+            fresh_wallet_detections = await self.fresh_wallet_detector.detect_fresh_wallet_activity(trades)
+
+            alerts_sent = 0
+
+            # Handle whale detection
+            if whale_analysis.get('anomaly', False):
+                logger.info(f"🐋 Whale detected in low-volume market: {market_data.get('question', 'Unknown')[:50]}...")
+
+                # Escalate if enabled
+                if self.settings.monitoring.whale_escalation_enabled:
+                    await self._escalate_market(market_id, market_data)
+
+                # Create and send whale alert
+                severity = self._determine_severity(AlertType.WHALE_ACTIVITY, whale_analysis)
+                alert = await self._create_alert(
+                    market_id, market_data, AlertType.WHALE_ACTIVITY, whale_analysis, severity.value
+                )
+                alert['confidence_score'] = self._calculate_anomaly_confidence(AlertType.WHALE_ACTIVITY, whale_analysis)
+                alert['multi_metric'] = False
+                alert['source'] = 'low_volume_scan'
+
+                if await self.alert_manager.send_alert(alert):
+                    alerts_sent += 1
+                    await self._track_whales_from_alert(alert, trades)
+                    await self._initialize_outcome_tracking(alert, market_id)
+
+            # Handle fresh wallet detections
+            for fw_detection in fresh_wallet_detections:
+                logger.info(f"💰 Fresh wallet detected in low-volume market: {market_data.get('question', 'Unknown')[:50]}...")
+
+                # Escalate if enabled
+                if self.settings.monitoring.whale_escalation_enabled:
+                    await self._escalate_market(market_id, market_data)
+
+                # Create and send fresh wallet alert
+                fw_alert = await self._create_fresh_wallet_alert(market_id, market_data, fw_detection)
+                if fw_alert:
+                    fw_alert['source'] = 'low_volume_scan'
+                    if await self.alert_manager.send_alert(fw_alert):
+                        alerts_sent += 1
+                        await self._track_whales_from_alert(fw_alert, trades)
+                        await self._initialize_outcome_tracking(fw_alert, market_id)
+
+            return alerts_sent
+
+        except Exception as e:
+            logger.error(f"Error analyzing low-volume market {market_id}: {e}", exc_info=True)
+            return 0
+
     async def _update_websocket_subscriptions(self, market_ids: List[str]):
         """Update WebSocket subscriptions for real-time data"""
         # Check if WebSocket is enabled
@@ -672,7 +819,48 @@ class MarketMonitor:
 
         # Log if loop exits
         logger.error(f"❌ CRITICAL: trade_polling_loop exited! self.running={self.running}")
-    
+
+    async def _low_volume_scan_loop(self):
+        """Scan low-volume markets for whale activity"""
+        while self.running:
+            try:
+                await self._run_low_volume_scan()
+                await asyncio.sleep(self.analysis_interval)  # Same frequency as high-volume markets
+            except Exception as e:
+                logger.error(f"Error in low-volume scan loop: {e}", exc_info=True)
+                await asyncio.sleep(30)
+
+        # Log if loop exits
+        logger.error(f"❌ CRITICAL: low_volume_scan_loop exited! self.running={self.running}")
+
+    async def _run_low_volume_scan(self):
+        """Run whale-only analysis on low-volume markets"""
+        if not self.low_volume_markets:
+            return
+
+        if self.debug_mode or self.show_normal_activity:
+            logger.info(f"🔍 Low-volume scan: Analyzing {len(self.low_volume_markets)} markets for whales...")
+        else:
+            logger.debug(f"🔍 Scanning {len(self.low_volume_markets)} low-volume markets...")
+
+        alerts_this_round = 0
+
+        for market_id, market_data in list(self.low_volume_markets.items()):  # Use list() to avoid dict modification during iteration
+            try:
+                alerts_sent_count = await self._analyze_market_for_whales(market_id, market_data)
+                if alerts_sent_count > 0:
+                    alerts_this_round += alerts_sent_count
+                elif self.debug_config.get('verbose_analysis', False):
+                    question = market_data.get('question', 'Unknown')[:40]
+                    logger.debug(f"   ✅ {question}... - no whales detected")
+
+            except Exception as e:
+                logger.error(f"Error scanning low-volume market {market_id}: {e}")
+
+        # Track alerts for system status
+        if alerts_this_round > 0:
+            self.alerts_generated += alerts_this_round
+
     async def _analysis_loop(self):
         """Main analysis loop - runs detection algorithms"""
         while self.running:

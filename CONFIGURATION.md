@@ -39,7 +39,7 @@ Controls connection settings and operational mode.
 
 ### Monitoring Configuration (`monitoring`)
 
-Controls which markets to monitor and how frequently.
+Controls which markets to monitor and how frequently. Supports hybrid monitoring mode for detecting insider whales in low-volume markets.
 
 ```json
 {
@@ -47,6 +47,10 @@ Controls which markets to monitor and how frequently.
     "markets": [],
     "volume_threshold": 1000,
     "max_markets": 50,
+    "enable_low_volume_scanning": true,
+    "max_low_volume_markets": 200,
+    "whale_escalation_enabled": true,
+    "monitor_all_markets": false,
     "check_interval": 60,
     "sort_by_volume": true,
     "market_discovery_interval": 300,
@@ -58,12 +62,33 @@ Controls which markets to monitor and how frequently.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `markets` | array | `[]` | Specific market IDs to monitor (empty = auto-discover) |
-| `volume_threshold` | number | `1000` | Minimum USD volume for market inclusion |
-| `max_markets` | number | `50` | Maximum number of markets to monitor simultaneously |
+| `volume_threshold` | number | `1000` | Minimum USD volume to classify as "high-volume" market |
+| `max_markets` | number/null | `50` | Maximum high-volume markets to monitor (`null` = unlimited) |
+| `enable_low_volume_scanning` | boolean | `true` | Enable whale-only scanning of low-volume markets |
+| `max_low_volume_markets` | number/null | `200` | Maximum low-volume markets to scan (`null` = unlimited) |
+| `whale_escalation_enabled` | boolean | `true` | Promote low-volume markets to full monitoring when whales detected |
+| `monitor_all_markets` | boolean | `false` | **EXPERIMENTAL**: Full analysis on ALL markets (ignores volume threshold) |
 | `check_interval` | number | `60` | Seconds between market data checks |
 | `sort_by_volume` | boolean | `true` | Prioritize high-volume markets for monitoring |
 | `market_discovery_interval` | number | `300` | Seconds between market discovery scans |
 | `analysis_interval` | number | `60` | Seconds between detection analysis runs |
+
+#### Monitoring Modes
+
+**Default (Hybrid Mode)**:
+- High-volume markets (≥ $1000): Full analysis with all 5 detectors
+- Low-volume markets (< $1000): Whale + Fresh Wallet detection only
+- Whale detected in low-volume → Permanently escalates to full monitoring
+- **Use case**: Catch insider whales operating in illiquid markets with less scrutiny
+
+**High-Volume Only** (`enable_low_volume_scanning: false`):
+- Only monitors markets with volume ≥ `volume_threshold`
+- Original behavior for focusing on liquid markets
+
+**Experimental All-Markets** (`monitor_all_markets: true`):
+- Fetches and analyzes ALL active markets (pagination until exhausted)
+- Ignores `volume_threshold`, `max_markets`, and `max_low_volume_markets`
+- **Warning**: High API usage, potential rate limiting
 
 ### Detection Configuration (`detection`)
 

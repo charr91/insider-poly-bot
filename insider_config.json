@@ -8,7 +8,11 @@
   "monitoring": {
     "markets": [],
     "volume_threshold": 1000,
-    "max_markets": 50,
+    "max_markets": null,
+    "enable_low_volume_scanning": true,
+    "max_low_volume_markets": null,
+    "whale_escalation_enabled": true,
+    "monitor_all_markets": false,
     "check_interval": 60,
     "sort_by_volume": true,
     "market_discovery_interval": 300,
