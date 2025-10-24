@@ -122,7 +122,99 @@ async def run_migration(db_path: str = DATABASE_PATH):
     db_manager = DatabaseManager.get_instance(db_url)
 ```
 
-### Migration Guide
+### Database Schema Migrations
+
+#### When Migrations Are Needed
+
+Database schema migrations are required when:
+- Adding new columns to existing tables
+- Modifying column types or constraints
+- Adding new indexes
+- Upgrading to a new version with schema changes
+
+#### Running Migrations
+
+**Using CLI (Recommended):**
+```bash
+# Inside Docker container
+docker compose exec insider-poly-bot insider-bot db migrate --verify
+
+# Or locally
+insider-bot db migrate --verify
+```
+
+**Using Migration Script Directly:**
+```bash
+# Inside Docker container
+docker compose exec insider-poly-bot python database/add_fresh_wallet_fields.py
+
+# Or locally
+python database/add_fresh_wallet_fields.py
+```
+
+**Check Current Schema:**
+```bash
+insider-bot db check-schema
+```
+
+#### Creating New Migrations
+
+When adding new database fields:
+
+1. **Update SQLAlchemy Model** (`database/models.py`)
+   ```python
+   class WhaleAddress(Base):
+       # Add new column
+       new_field: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+   ```
+
+2. **Create Migration Script** (`database/add_<feature>_fields.py`)
+   ```python
+   async def run_migration(db_path: str = DATABASE_PATH):
+       from config.database import get_connection_string
+       from database.database import DatabaseManager
+
+       db_manager = DatabaseManager.get_instance(get_connection_string(db_path))
+
+       async with db_manager.session() as session:
+           # Check if column exists
+           result = await session.execute(text("PRAGMA table_info(table_name)"))
+           columns = [col[1] for col in result.fetchall()]
+
+           if 'new_field' not in columns:
+               await session.execute(text(
+                   "ALTER TABLE table_name ADD COLUMN new_field BOOLEAN DEFAULT 0 NOT NULL"
+               ))
+               await session.commit()
+   ```
+
+3. **Add CLI Integration** (if needed for specific migration)
+   - Update `cli/commands/db_commands.py` to reference new migration
+
+4. **Update Documentation**
+   - Add migration notes to CHANGELOG
+   - Update TROUBLESHOOTING.md if schema mismatch could cause errors
+
+5. **Test Migration**
+   ```bash
+   # Test on development database
+   python database/add_<feature>_fields.py
+
+   # Verify schema
+   insider-bot db check-schema
+   ```
+
+#### Migration Best Practices
+
+- ✅ Always use `from config.database import DATABASE_PATH`
+- ✅ Make migrations idempotent (check if already applied)
+- ✅ Include verification function
+- ✅ Log migration progress
+- ✅ Test on backup/copy before production
+- ❌ Never drop columns (data loss)
+- ❌ Never hardcode database paths
+
+### Database Path Configuration Guide
 
 If you need to add a new database or change paths:
 
@@ -148,6 +240,32 @@ docker-compose exec insider-poly-bot insider-bot alerts recent --hours 24
 ```
 
 ### Common Issues and Solutions
+
+#### Issue: Database Schema Mismatch (Column Not Found)
+
+**Symptoms:**
+```bash
+sqlite3.OperationalError: no such column: whale_addresses.is_fresh_wallet
+Failed to get top whales: no such column error
+```
+
+**Cause:** Database schema is outdated - missing columns that the current code expects.
+
+**Solution:**
+```bash
+# Run migrations
+docker compose exec insider-poly-bot insider-bot db migrate --verify
+
+# Or directly
+docker compose exec insider-poly-bot python database/add_fresh_wallet_fields.py
+```
+
+**Prevention:** Always run migrations after pulling new code:
+```bash
+git pull
+docker compose build
+docker compose exec insider-poly-bot insider-bot db migrate --verify
+```
 
 #### Issue: CLI Commands Return Empty Results
 

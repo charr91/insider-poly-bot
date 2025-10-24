@@ -455,6 +455,34 @@ insider-bot stats summary
 insider-bot stats whales
 ```
 
+### Database Management Commands
+
+```bash
+# Run database migrations (after code updates)
+insider-bot db migrate --verify
+
+# Check current database schema
+insider-bot db check-schema
+```
+
+**When to use migrations:**
+- After pulling new code from git
+- When encountering "no such column" errors
+- After upgrading to a new version
+
+**Example:**
+```bash
+# After upgrading the bot
+git pull
+docker compose build
+docker compose exec insider-poly-bot insider-bot db migrate --verify
+
+# Check if migration was successful
+docker compose exec insider-poly-bot insider-bot db check-schema
+```
+
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#database-issues) for database-related issues.
+
 ### Example CLI Session
 
 ```bash

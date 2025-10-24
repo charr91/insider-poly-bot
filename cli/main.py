@@ -6,6 +6,7 @@ Usage:
     insider-bot whales list            # View whale addresses
     insider-bot alerts recent          # View recent alerts
     insider-bot stats performance      # View performance stats
+    insider-bot db migrate             # Run database migrations
 """
 
 import click
@@ -18,6 +19,7 @@ from dotenv import load_dotenv
 from cli.commands.whale_commands import whales
 from cli.commands.alert_commands import alerts
 from cli.commands.stats_commands import stats
+from cli.commands.db_commands import db
 from config.database import DATABASE_PATH
 
 
@@ -80,6 +82,7 @@ async def _run_async(config_path, db_path):
 cli.add_command(whales)
 cli.add_command(alerts)
 cli.add_command(stats)
+cli.add_command(db)
 
 
 if __name__ == '__main__':

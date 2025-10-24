@@ -357,6 +357,72 @@ Alert spam in Discord
 }
 ```
 
+### Database Issues
+
+#### Issue: Database schema mismatch - missing columns
+**Symptoms:**
+```bash
+sqlite3.OperationalError: no such column: whale_addresses.is_fresh_wallet
+Failed to get top whales: no such column error
+SQL column not found errors in CLI commands
+```
+
+**Cause:**
+The database schema is outdated and missing columns that the current version of the code expects. This typically happens when:
+- Upgrading to a newer version of the bot
+- Database was created with an older schema
+- Migrations haven't been run after updating code
+
+**Solutions:**
+
+```bash
+# Option 1: Run migration using the CLI (recommended)
+docker compose exec insider-poly-bot insider-bot db migrate --verify
+
+# Or if running locally
+insider-bot db migrate --verify
+
+# Option 2: Run migration script directly
+docker compose exec insider-poly-bot python database/add_fresh_wallet_fields.py
+
+# Option 3: Check current schema
+docker compose exec insider-poly-bot insider-bot db check-schema
+
+# Option 4: If all else fails, recreate the database (WARNING: loses data)
+docker compose exec insider-poly-bot mv /app/data/insider_data.db /app/data/insider_data.db.backup
+# Restart bot to create fresh database
+docker compose restart insider-poly-bot
+```
+
+**Prevention:**
+Always run database migrations after pulling new code:
+```bash
+git pull
+docker compose build
+docker compose exec insider-poly-bot insider-bot db migrate --verify
+```
+
+#### Issue: Database locked error
+**Symptoms:**
+```bash
+sqlite3.OperationalError: database is locked
+Cannot write to database
+```
+
+**Solutions:**
+```bash
+# Check for multiple bot processes
+docker compose exec insider-poly-bot pgrep -f "python.*main.py"
+# Kill extra processes if found
+docker compose exec insider-poly-bot pkill -f "python.*main.py"
+
+# Restart container
+docker compose restart insider-poly-bot
+
+# If persistent, check file permissions
+docker compose exec insider-poly-bot ls -lh /app/data/insider_data.db
+```
+
 ### Runtime Issues
 
 #### Issue: Bot stops unexpectedly
