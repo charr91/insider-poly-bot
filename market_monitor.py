@@ -297,6 +297,7 @@ class MarketMonitor:
 
                 # Process token IDs for all markets
                 token_ids_raw = market.get('clobTokenIds', [])
+                token_ids = None  # Initialize to None
                 if token_ids_raw:
                     try:
                         if isinstance(token_ids_raw, str):
@@ -318,8 +319,8 @@ class MarketMonitor:
                         high_volume_count += 1
 
                         # Add to websocket and initialize baseline
-                        if token_ids_raw:
-                            websocket_token_ids.extend(token_ids[:2] if isinstance(token_ids_raw, list) else [])
+                        if token_ids and isinstance(token_ids, list) and len(token_ids) >= 2:
+                            websocket_token_ids.extend(token_ids[:2])
                         if condition_id not in self.monitored_markets and condition_id not in self.escalated_markets:
                             await self._initialize_market_baseline(condition_id, market)
 
@@ -330,8 +331,8 @@ class MarketMonitor:
                         high_volume_count += 1
 
                         # Add to websocket and initialize baseline
-                        if token_ids_raw:
-                            websocket_token_ids.extend(token_ids[:2] if isinstance(token_ids_raw, list) else [])
+                        if token_ids and isinstance(token_ids, list) and len(token_ids) >= 2:
+                            websocket_token_ids.extend(token_ids[:2])
                         if condition_id not in self.monitored_markets and condition_id not in self.escalated_markets:
                             await self._initialize_market_baseline(condition_id, market)
 
