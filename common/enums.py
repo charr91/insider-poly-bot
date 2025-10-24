@@ -310,3 +310,45 @@ class WhaleRole:
     PRIMARY_ACTOR = "PRIMARY_ACTOR"  # Main whale driving the activity
     COORDINATOR = "COORDINATOR"  # Whale coordinating with others
     PARTICIPANT = "PARTICIPANT"  # Whale participating in coordinated activity
+
+
+class RecommendationConstants:
+    """
+    Recommendation engine constants for trading recommendations.
+
+    These thresholds control when and how trading recommendations are generated
+    based on confidence scores and alert types.
+    """
+    # Confidence level thresholds for multi-metric alerts
+    VERY_HIGH_MULTI_CONFIDENCE = 15.0  # Very high confidence for multi-metric
+    HIGH_MULTI_CONFIDENCE = 12.0  # High confidence for multi-metric
+    MULTI_METRIC_CRITICAL = 18.0  # Critical threshold with 3+ signals
+
+    # Confidence level thresholds for single-metric classification
+    VERY_HIGH_SINGLE_CONFIDENCE = 12.0
+    HIGH_SINGLE_CONFIDENCE = 9.0
+    MEDIUM_SINGLE_CONFIDENCE = 6.0
+
+    # Price calculation multipliers for buy recommendations
+    ENTRY_PRICE_MULTIPLIER = 1.02  # 2% above current for entry
+    TARGET_PRICE_MULTIPLIER = 1.30  # 30% target for high confidence
+    RISK_PRICE_MULTIPLIER = 0.90  # 10% stop loss
+
+    # Price calculation multipliers for sell recommendations
+    SELL_ENTRY_MULTIPLIER = 0.98  # 2% below current for entry
+    SELL_RISK_MULTIPLIER = 1.05  # 5% risk for sell positions
+
+    # Whale activity thresholds for actionable recommendations
+    HIGH_CONFIDENCE_VOLUME = 50000  # $50K+ for high confidence whale signals
+    MEDIUM_CONFIDENCE_VOLUME = 10000  # $10K+ for medium confidence
+    HIGH_DIRECTIONAL_BIAS = 0.8  # 80% directional bias for strong signal
+    MEDIUM_DIRECTIONAL_BIAS = 0.6  # 60% for moderate signal
+
+    # Coordination thresholds for recommendations
+    CRITICAL_COORDINATION_SCORE = 0.8  # 80%+ coordination for critical alerts
+    HIGH_COORDINATION_SCORE = 0.6  # 60%+ for high confidence
+    MIN_COORDINATED_WALLETS_CRITICAL = 5  # Minimum wallets for critical
+    MIN_COORDINATED_WALLETS_HIGH = 3  # Minimum wallets for high
+
+    # Price direction thresholds for volume/price alerts
+    PRICE_DIRECTION_THRESHOLD = 2.0  # 2% change to determine direction

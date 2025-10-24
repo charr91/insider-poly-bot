@@ -19,7 +19,8 @@ from .enums import (
     PriceConstants,
     CoordinationConstants,
     MarketMakerThresholds,
-    WhaleRole
+    WhaleRole,
+    RecommendationConstants
 )
 
 __all__ = [
@@ -39,5 +40,6 @@ __all__ = [
     'PriceConstants',
     'CoordinationConstants',
     'MarketMakerThresholds',
-    'WhaleRole'
+    'WhaleRole',
+    'RecommendationConstants'
 ]

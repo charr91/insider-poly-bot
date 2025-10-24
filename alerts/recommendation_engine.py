@@ -5,7 +5,7 @@ Generates actionable trading recommendations based on alert analysis
 
 from typing import Dict, Optional, Tuple
 from enum import Enum
-from common import AlertType, AlertSeverity
+from common import AlertType, AlertSeverity, RecommendationConstants
 import logging
 
 logger = logging.getLogger(__name__)
@@ -165,15 +165,15 @@ class RecommendationEngine:
 
         # HIGH/CRITICAL confidence with strong directional bias
         if (severity in [AlertSeverity.CRITICAL, AlertSeverity.HIGH] and
-            direction_imbalance > 0.8 and
-            total_volume > 50000):
+            direction_imbalance > RecommendationConstants.HIGH_DIRECTIONAL_BIAS and
+            total_volume > RecommendationConstants.HIGH_CONFIDENCE_VOLUME):
 
             # In prediction markets, always BUY the outcome we think will happen
             action = RecommendationAction.BUY
 
             # Calculate price levels
-            entry_price = current_price * 1.02
-            risk_price = current_price * 0.95
+            entry_price = current_price * RecommendationConstants.ENTRY_PRICE_MULTIPLIER
+            risk_price = current_price * RecommendationConstants.RISK_PRICE_MULTIPLIER
 
             # Create recommendation text
             action_text = "Buy"
@@ -201,7 +201,7 @@ class RecommendationEngine:
             }
 
         # MEDIUM confidence or moderate volume
-        elif total_volume > 10000 and direction_imbalance > 0.6:
+        elif total_volume > RecommendationConstants.MEDIUM_CONFIDENCE_VOLUME and direction_imbalance > RecommendationConstants.MEDIUM_DIRECTIONAL_BIAS:
             action_text = "purchased" if dominant_side == 'BUY' else "sold"
 
             text = f"Monitor - Whale {action_text} ${total_volume/1000:.0f}K {outcome} @ ${current_price:.2f}"
@@ -247,12 +247,12 @@ class RecommendationEngine:
         outcome = self._determine_outcome_from_coordination(analysis)
 
         # CRITICAL - Very high coordination score
-        if severity == AlertSeverity.CRITICAL and coord_score > 0.8 and unique_wallets >= 5:
+        if severity == AlertSeverity.CRITICAL and coord_score > RecommendationConstants.CRITICAL_COORDINATION_SCORE and unique_wallets >= RecommendationConstants.MIN_COORDINATED_WALLETS_CRITICAL:
             action = RecommendationAction.BUY if dominant_direction == 'BUY' else RecommendationAction.SELL
             action_text = "Buy" if action == RecommendationAction.BUY else "Sell"
 
-            entry_price = current_price * 1.02 if action == RecommendationAction.BUY else current_price * 0.98
-            risk_price = current_price * 0.95 if action == RecommendationAction.BUY else current_price * 1.05
+            entry_price = current_price * RecommendationConstants.ENTRY_PRICE_MULTIPLIER if action == RecommendationAction.BUY else current_price * RecommendationConstants.SELL_ENTRY_MULTIPLIER
+            risk_price = current_price * RecommendationConstants.RISK_PRICE_MULTIPLIER if action == RecommendationAction.BUY else current_price * RecommendationConstants.SELL_RISK_MULTIPLIER
 
             warning = " | ⚠️ Risk: Potential wash trading" if wash_trading else ""
             text = f"Strong insider signal - Consider {outcome} {action_text} @ ${current_price:.2f}{warning}"
@@ -277,7 +277,7 @@ class RecommendationEngine:
             }
 
         # HIGH - Moderate coordination
-        elif coord_score > 0.6 and unique_wallets >= 3:
+        elif coord_score > RecommendationConstants.HIGH_COORDINATION_SCORE and unique_wallets >= RecommendationConstants.MIN_COORDINATED_WALLETS_HIGH:
             text = f"Monitor - {unique_wallets} wallets coordinated on {outcome}"
             reasoning = (
                 f"Coordination detected (score: {coord_score:.2f}). "
@@ -348,13 +348,13 @@ class RecommendationEngine:
                     full_anomalies.append(anomaly)
             price_direction = self._determine_price_direction(analysis, full_anomalies)
 
-        # Very high confidence (3+ signals) - threshold now 18.0
-        if confidence_score >= 18 and len(supporting_anomalies) >= 2:
+        # Very high confidence (3+ signals)
+        if confidence_score >= RecommendationConstants.MULTI_METRIC_CRITICAL and len(supporting_anomalies) >= 2:
             if is_actionable_alert:
                 # Whale/Coordination: Show BUY recommendation
-                entry_price = current_price * 1.02
-                target_price = current_price * 1.30
-                risk_price = current_price * 0.90
+                entry_price = current_price * RecommendationConstants.ENTRY_PRICE_MULTIPLIER
+                target_price = current_price * RecommendationConstants.TARGET_PRICE_MULTIPLIER
+                risk_price = current_price * RecommendationConstants.RISK_PRICE_MULTIPLIER
 
                 support_text = " + ".join([format_alert_type(a['type']) for a in supporting_anomalies[:2]])
 
@@ -401,11 +401,11 @@ class RecommendationEngine:
                     'confidence_level': confidence_level.value
                 }
 
-        # High confidence (2 signals) - threshold now 12.0
-        elif confidence_score >= 12 and len(supporting_anomalies) >= 1:
+        # High confidence (2 signals)
+        elif confidence_score >= RecommendationConstants.HIGH_MULTI_CONFIDENCE and len(supporting_anomalies) >= 1:
             if is_actionable_alert:
                 # Whale/Coordination: Show BUY recommendation
-                entry_price = current_price * 1.02
+                entry_price = current_price * RecommendationConstants.ENTRY_PRICE_MULTIPLIER
 
                 support_text = format_alert_type(supporting_anomalies[0]['type'])
 
@@ -512,13 +512,13 @@ class RecommendationEngine:
 
     def _determine_confidence_level(self, confidence_score: float, multi_metric: bool) -> ConfidenceLevel:
         """Determine confidence level from score"""
-        if multi_metric and confidence_score >= 15:
+        if multi_metric and confidence_score >= RecommendationConstants.VERY_HIGH_MULTI_CONFIDENCE:
             return ConfidenceLevel.VERY_HIGH
-        elif confidence_score >= 12:
+        elif confidence_score >= RecommendationConstants.VERY_HIGH_SINGLE_CONFIDENCE:
             return ConfidenceLevel.VERY_HIGH
-        elif confidence_score >= 9:
+        elif confidence_score >= RecommendationConstants.HIGH_SINGLE_CONFIDENCE:
             return ConfidenceLevel.HIGH
-        elif confidence_score >= 6:
+        elif confidence_score >= RecommendationConstants.MEDIUM_SINGLE_CONFIDENCE:
             return ConfidenceLevel.MEDIUM
         else:
             return ConfidenceLevel.LOW
@@ -579,10 +579,10 @@ class RecommendationEngine:
             elif trend == 'DOWNTREND':
                 return "Selling"
 
-            # Otherwise use price change percentage (threshold: 2%)
-            if price_change_pct > 2.0:
+            # Otherwise use price change percentage
+            if price_change_pct > RecommendationConstants.PRICE_DIRECTION_THRESHOLD:
                 return "Buying"
-            elif price_change_pct < -2.0:
+            elif price_change_pct < -RecommendationConstants.PRICE_DIRECTION_THRESHOLD:
                 return "Selling"
 
         # Check supporting anomalies for Unusual Price Movement
@@ -601,9 +601,9 @@ class RecommendationEngine:
                         elif trend == 'DOWNTREND':
                             return "Selling"
 
-                        if price_change_pct > 2.0:
+                        if price_change_pct > RecommendationConstants.PRICE_DIRECTION_THRESHOLD:
                             return "Buying"
-                        elif price_change_pct < -2.0:
+                        elif price_change_pct < -RecommendationConstants.PRICE_DIRECTION_THRESHOLD:
                             return "Selling"
 
         # If we can't determine direction, return None
