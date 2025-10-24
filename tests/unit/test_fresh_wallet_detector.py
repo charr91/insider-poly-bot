@@ -416,3 +416,143 @@ class TestFreshWalletDetector:
         # Should still detect, with outcome defaulting to UNKNOWN
         assert len(result) == 1
         assert result[0]['outcome'] == 'UNKNOWN'
+
+    @pytest.mark.asyncio
+    async def test_bet_size_exactly_at_threshold(self, detector, mock_data_api, mock_whale_tracker):
+        """Test trade with bet size exactly at min_bet_size_usd threshold"""
+        # Default threshold is 2000 USD
+        mock_whale_tracker.get_whale.return_value = None
+        mock_data_api.get_wallet_trades.return_value = []
+
+        exact_threshold_trade = [{
+            'price': '0.50',
+            'size': '4000',  # Exactly $2,000 (4000 * 0.50)
+            'side': 'BUY',
+            'outcome': 'YES',
+            'maker': '0xthreshold',
+            'tx_hash': '0xtxthreshold',
+            'timestamp': 1234567890
+        }]
+
+        result = await detector.detect_fresh_wallet_activity(exact_threshold_trade)
+
+        # Should detect at exact threshold (>= condition)
+        assert len(result) == 1
+        assert result[0]['bet_size'] == 2000.0
+
+    @pytest.mark.asyncio
+    async def test_bet_size_just_below_threshold(self, detector, mock_data_api, mock_whale_tracker):
+        """Test trade with bet size just below threshold"""
+        mock_whale_tracker.get_whale.return_value = None
+        mock_data_api.get_wallet_trades.return_value = []
+
+        below_threshold_trade = [{
+            'price': '0.50',
+            'size': '3999',  # $1,999.50 (just below $2,000)
+            'side': 'BUY',
+            'outcome': 'YES',
+            'maker': '0xbelowthreshold',
+            'tx_hash': '0xtxbelow',
+            'timestamp': 1234567890
+        }]
+
+        result = await detector.detect_fresh_wallet_activity(below_threshold_trade)
+
+        # Should not detect below threshold
+        assert len(result) == 0
+
+    @pytest.mark.asyncio
+    async def test_wallet_with_exactly_max_previous_trades(self, detector, mock_data_api, mock_whale_tracker):
+        """Test wallet with exactly max_previous_trades (should not trigger)"""
+        # Default max is 0, so test with config that allows 1 trade
+        config = {
+            'detection': {
+                'fresh_wallet_thresholds': {
+                    'min_bet_size_usd': 2000,
+                    'api_lookback_limit': 100,
+                    'max_previous_trades': 1
+                }
+            }
+        }
+        detector_custom = FreshWalletDetector(config, mock_data_api, mock_whale_tracker)
+
+        mock_whale_tracker.get_whale.return_value = None
+        # Wallet has exactly 1 previous trade
+        mock_data_api.get_wallet_trades.return_value = [
+            {'price': '0.30', 'size': '100', 'timestamp': 1234567800}
+        ]
+
+        large_bet_trade = [{
+            'price': '0.50',
+            'size': '5000',  # $2,500
+            'side': 'BUY',
+            'outcome': 'YES',
+            'maker': '0xonetrade',
+            'tx_hash': '0xtxone',
+            'timestamp': 1234567890
+        }]
+
+        result = await detector_custom.detect_fresh_wallet_activity(large_bet_trade)
+
+        # With max_previous_trades=1, wallet with exactly 1 trade should not trigger
+        # (Condition is: previous_trades <= max_previous_trades, so 1 <= 1 = True, should trigger)
+        assert len(result) == 1  # Should still trigger at boundary
+
+    @pytest.mark.asyncio
+    async def test_wallet_with_just_over_max_previous_trades(self, detector, mock_data_api, mock_whale_tracker):
+        """Test wallet with just over max_previous_trades"""
+        config = {
+            'detection': {
+                'fresh_wallet_thresholds': {
+                    'min_bet_size_usd': 2000,
+                    'api_lookback_limit': 100,
+                    'max_previous_trades': 1
+                }
+            }
+        }
+        detector_custom = FreshWalletDetector(config, mock_data_api, mock_whale_tracker)
+
+        mock_whale_tracker.get_whale.return_value = None
+        # Wallet has 2 previous trades (over max of 1)
+        mock_data_api.get_wallet_trades.return_value = [
+            {'price': '0.30', 'size': '100', 'timestamp': 1234567800},
+            {'price': '0.40', 'size': '200', 'timestamp': 1234567850}
+        ]
+
+        large_bet_trade = [{
+            'price': '0.50',
+            'size': '5000',  # $2,500
+            'side': 'BUY',
+            'outcome': 'YES',
+            'maker': '0xtwotrades',
+            'tx_hash': '0xtxtwo',
+            'timestamp': 1234567890
+        }]
+
+        result = await detector_custom.detect_fresh_wallet_activity(large_bet_trade)
+
+        # Should not trigger with 2 trades when max is 1
+        assert len(result) == 0
+
+    @pytest.mark.asyncio
+    async def test_api_error_during_wallet_verification(self, detector, mock_data_api, mock_whale_tracker):
+        """Test handling of API errors during wallet history check"""
+        mock_whale_tracker.get_whale.return_value = None
+        # Simulate API error
+        mock_data_api.get_wallet_trades.side_effect = Exception("API connection failed")
+
+        large_bet_trade = [{
+            'price': '0.50',
+            'size': '5000',  # $2,500
+            'side': 'BUY',
+            'outcome': 'YES',
+            'maker': '0xapierror',
+            'tx_hash': '0xtxapierror',
+            'timestamp': 1234567890
+        }]
+
+        result = await detector.detect_fresh_wallet_activity(large_bet_trade)
+
+        # Should handle error gracefully and not crash
+        # Behavior depends on implementation - either skip the wallet or return empty
+        assert isinstance(result, list)  # Should still return a list

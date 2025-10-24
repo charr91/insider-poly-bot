@@ -201,3 +201,124 @@ class TestRecommendationEngine:
 
         if recommendation['risk_price']:
             assert recommendation['risk_price'] != current_price
+
+    def test_confidence_threshold_boundary_multi_metric(self, engine, market_data):
+        """Test confidence score exactly at multi-metric threshold (12.0)"""
+        analysis = {
+            'total_whale_volume': 60000,
+            'whale_count': 2,
+            'dominant_side': 'BUY',
+            'direction_imbalance': 0.85
+        }
+        supporting_anomalies = [{'type': AlertType.VOLUME_SPIKE, 'analysis': {}}]
+
+        recommendation = engine.generate_recommendation(
+            alert_type=AlertType.WHALE_ACTIVITY,
+            severity=AlertSeverity.HIGH,
+            analysis=analysis,
+            market_data=market_data,
+            confidence_score=12.0,  # Exactly at threshold
+            multi_metric=True,
+            supporting_anomalies=supporting_anomalies
+        )
+
+        # Should get actionable recommendation at threshold
+        assert recommendation['action'] == RecommendationAction.BUY.value
+        assert recommendation['entry_price'] is not None
+
+    def test_confidence_threshold_boundary_critical(self, engine, market_data):
+        """Test confidence score exactly at critical multi-metric threshold (18.0)"""
+        analysis = {
+            'total_whale_volume': 80000,
+            'whale_count': 4,
+            'dominant_side': 'BUY',
+            'direction_imbalance': 0.9
+        }
+        supporting_anomalies = [
+            {'type': AlertType.VOLUME_SPIKE, 'analysis': {}},
+            {'type': AlertType.UNUSUAL_PRICE_MOVEMENT, 'analysis': {}}
+        ]
+
+        recommendation = engine.generate_recommendation(
+            alert_type=AlertType.WHALE_ACTIVITY,
+            severity=AlertSeverity.CRITICAL,
+            analysis=analysis,
+            market_data=market_data,
+            confidence_score=18.0,  # Exactly at critical threshold
+            multi_metric=True,
+            supporting_anomalies=supporting_anomalies
+        )
+
+        # Should get very high confidence recommendation with target price
+        assert recommendation['action'] == RecommendationAction.BUY.value
+        assert recommendation['target_price'] is not None
+        assert recommendation['entry_price'] is not None
+        assert recommendation['risk_price'] is not None
+
+    def test_missing_analysis_data_handles_gracefully(self, engine, market_data):
+        """Test that missing analysis data doesn't crash"""
+        analysis = {}  # Empty analysis
+
+        recommendation = engine.generate_recommendation(
+            alert_type=AlertType.WHALE_ACTIVITY,
+            severity=AlertSeverity.MEDIUM,
+            analysis=analysis,
+            market_data=market_data,
+            confidence_score=5.0,
+            multi_metric=False
+        )
+
+        # Should return monitor recommendation without crashing
+        assert recommendation['action'] == RecommendationAction.MONITOR.value
+        assert recommendation['text'] is not None
+
+    def test_zero_supporting_anomalies(self, engine, market_data):
+        """Test multi-metric with empty supporting anomalies list"""
+        analysis = {
+            'total_whale_volume': 25000,
+            'whale_count': 2,
+            'dominant_side': 'BUY',
+            'direction_imbalance': 0.7
+        }
+
+        recommendation = engine.generate_recommendation(
+            alert_type=AlertType.WHALE_ACTIVITY,
+            severity=AlertSeverity.HIGH,
+            analysis=analysis,
+            market_data=market_data,
+            confidence_score=15.0,
+            multi_metric=True,
+            supporting_anomalies=[]  # Empty list
+        )
+
+        # Should handle gracefully
+        assert recommendation is not None
+        assert 'action' in recommendation
+
+    def test_extreme_confidence_score(self, engine, market_data):
+        """Test handling of extremely high confidence scores"""
+        analysis = {
+            'total_whale_volume': 200000,
+            'whale_count': 10,
+            'dominant_side': 'BUY',
+            'direction_imbalance': 0.95
+        }
+        supporting_anomalies = [
+            {'type': AlertType.VOLUME_SPIKE, 'analysis': {}},
+            {'type': AlertType.UNUSUAL_PRICE_MOVEMENT, 'analysis': {}},
+            {'type': AlertType.COORDINATED_TRADING, 'analysis': {}}
+        ]
+
+        recommendation = engine.generate_recommendation(
+            alert_type=AlertType.WHALE_ACTIVITY,
+            severity=AlertSeverity.CRITICAL,
+            analysis=analysis,
+            market_data=market_data,
+            confidence_score=50.0,  # Extremely high
+            multi_metric=True,
+            supporting_anomalies=supporting_anomalies
+        )
+
+        # Should still generate valid recommendation
+        assert recommendation['action'] == RecommendationAction.BUY.value
+        assert recommendation['confidence_level'] == ConfidenceLevel.VERY_HIGH.value
