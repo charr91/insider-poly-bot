@@ -1,397 +1,160 @@
 # Polymarket Insider Trading Detection Bot
 
-🚀 **Real-time detection of unusual trading patterns and potential insider activity on Polymarket**
+Real-time detection of unusual trading patterns on [Polymarket](https://polymarket.com) — a prediction market on Polygon. The bot connects to live trade streams, runs statistical detection algorithms, and surfaces actionable alerts via Discord and Telegram.
 
-A sophisticated bot that monitors Polymarket trading activity to identify potential insider trading through advanced pattern detection algorithms including volume spikes, whale activity, price movements, and coordinated trading behavior.
+## What It Does
 
-## 📚 Documentation
+The bot monitors Polymarket trades in real time and flags activity that may indicate informed trading:
 
-- **[Configuration Guide](CONFIGURATION.md)** - Complete setup and parameter reference
-- **[Usage Examples](USAGE.md)** - Commands and operational scenarios
-- **[Testing Guide](TESTING.md)** - Testing documentation and development guidelines
-- **[Architecture Guide](ARCHITECTURE.md)** - System design, database patterns, and technical details
-- **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
-- **[Deployment Guide](DEPLOYMENT.md)** - Docker setup and VPS deployment
+- **Volume spike detection** — Z-score analysis identifies statistically unusual trade bursts
+- **Whale tracking** — Flags large trades ($2K+) and tracks repeat whale wallets in a database, with automatic market maker filtering
+- **Price movement analysis** — Detects rapid price swings, volatility spikes, and momentum shifts
+- **Coordination detection** — Identifies synchronized trading across multiple wallets within tight time windows
+- **Fresh wallet detection** — Flags large bets from wallets with little or no trading history
 
-## ✨ Key Features
+When anomalies are detected, the bot generates severity-rated alerts with context-aware trading recommendations and sends them to Discord/Telegram.
 
-- **📊 Real-time Market Monitoring**: Live WebSocket connection for instant trade data
-- **🔍 Multi-Algorithm Detection**: Volume spikes, whale detection, price movement analysis, and coordination detection
-- **⚡ Advanced Pattern Recognition**: Statistical analysis using Z-scores, volatility measurements, and momentum indicators
-- **🔔 Smart Alerting**: Actionable trading recommendations with Discord & Telegram support
-- **🎯 Intelligent Recommendations**: Context-aware buy/sell/monitor recommendations based on signal strength and confidence
-- **🐋 Whale Address Tracking**: Automatic database storage of whale wallet addresses from alerts for analysis
-- **🔗 Market Integration**: Direct links to Polymarket events and Polygonscan transactions in alerts
-- **🌐 Modular Architecture**: Separate data sources, detection algorithms, and alert systems
-- **📈 Comprehensive Analytics**: Detailed logging and activity reporting
-- **⚙️ Flexible Configuration**: Extensive customization through JSON configuration
+## Tech Stack
 
-## 🛠️ Prerequisites
+| Layer | Technology |
+|---|---|
+| **Runtime** | Python 3.10+, fully async (`asyncio`, `aiohttp`) |
+| **Data Ingestion** | WebSocket (live trades) + REST API (market discovery, historical data) |
+| **Detection** | NumPy, SciPy, Pandas — Z-scores, rolling statistics, momentum indicators |
+| **Persistence** | SQLAlchemy 2.0 + aiosqlite (async SQLite) with Alembic migrations |
+| **API / Dashboard** | FastAPI + Uvicorn, WebSocket push to React frontend |
+| **CLI** | Click + Rich for whale queries, alert history, and performance stats |
+| **Notifications** | Discord webhooks, Telegram Bot API |
+| **Testing** | pytest (async), Hypothesis (property-based), 18 unit + 7 integration test modules |
+| **Deployment** | Docker Compose |
 
-- **Python 3.8+** (Python 3.10+ recommended)
-- **API Access**: Polymarket CLOB API access (optional for enhanced features)
-- **Discord Webhook** (optional - for Discord alerts)
-- **Telegram Bot** (optional - for Telegram alerts)
-  - Create bot via [@BotFather](https://t.me/BotFather) on Telegram
-  - Get your chat ID by messaging the bot and visiting: `https://api.telegram.org/bot<YourBOTToken>/getUpdates`
+## Architecture
 
-## 📦 Installation
-
-### 1. Clone the Repository
-```bash
-git clone <repository-url>
-cd insider-poly-bot
+```
+                    ┌─────────────────┐
+                    │   Polymarket    │
+                    │   WebSocket     │
+                    └────────┬────────┘
+                             │ live trades
+                             ▼
+┌──────────────┐    ┌────────────────┐    ┌──────────────────┐
+│  Data API    │───▶│ Market Monitor │───▶│   Detection      │
+│  Client      │    │ (orchestrator) │    │   Pipeline       │
+└──────────────┘    └────────────────┘    │                  │
+  market discovery    manages lifecycle    │  VolumeDetector  │
+  historical data     coordinates flow     │  WhaleDetector   │
+                                          │  PriceDetector   │
+                                          │  CoordDetector   │
+                                          │  FreshWalletDet. │
+                                          └────────┬─────────┘
+                                                   │ anomalies
+                                                   ▼
+                                          ┌──────────────────┐
+                                          │  Alert Manager   │
+                                          │                  │
+                                          │  Recommendation  │
+                                          │  Engine          │
+                                          │       │          │
+                                          │  ┌────┴────┐     │
+                                          │  │Discord  │     │
+                                          │  │Telegram │     │
+                                          │  │Console  │     │
+                                          │  └─────────┘     │
+                                          └────────┬─────────┘
+                                                   │
+                                                   ▼
+                                          ┌──────────────────┐
+                                          │  SQLite (async)  │
+                                          │  alerts, whales, │
+                                          │  outcomes, stats │
+                                          └──────────────────┘
 ```
 
-### 2. Create Virtual Environment
-```bash
-python -m venv insider-env
-source insider-env/bin/activate  # On Windows: insider-env\Scripts\activate
-```
+All detectors inherit from a common `DetectorBase` and load thresholds from config. The alert system uses a pluggable storage backend (protocol-based) and formats are handled by dedicated `DiscordFormatter`/`TelegramFormatter` classes.
 
-### 3. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
+## Key Design Decisions
 
-### 4. Environment Setup
-```bash
-# Copy the example environment file
-cp .env.example .env
+- **Async everywhere** — The entire pipeline is async, from WebSocket ingestion through database writes. This allows monitoring hundreds of markets concurrently on a single thread.
+- **Statistical detection over rules** — Detectors use Z-scores, rolling standard deviations, and momentum calculations rather than hard thresholds, adapting to each market's baseline.
+- **Market maker filtering** — Whale alerts are noisy without it. A heuristic scoring system (trade frequency, balance, diversity, consistency) identifies market makers and excludes them automatically.
+- **Centralized config** — All detection thresholds come from `insider_config.json` with env var overrides. No magic numbers in detection code.
+- **Pluggable alert storage** — Alert storage uses a Protocol-based backend, making it straightforward to swap SQLite for Postgres or any other store.
 
-# Edit .env with your API keys (optional)
-nano .env
-```
-
-### 5. Configuration Setup
-```bash
-# The bot comes with a default configuration
-# Copy and customize as needed
-cp insider_config.json my_config.json
-```
-
-> 📖 **For detailed configuration options, see the [Configuration Guide](CONFIGURATION.md)**
-
-## 🚀 Quick Start
-
-### Basic Usage
-```bash
-# Start monitoring with default configuration
-python main.py
-
-# Use custom configuration file
-python main.py --config my_config.json
-```
-
-> 💻 **For more usage examples and operational guidance, see the [Usage Guide](USAGE.md)**
-
-### Example Output
-```
-🚀 POLYMARKET INSIDER TRADING DETECTION BOT
-📊 Modular WebSocket + Data API Architecture
-================================================================================
-
-⚙️  CONFIGURATION SUMMARY
-────────────────────────────────────────
-  📊 Markets: 50 max, $1,000 min volume
-  🔍 Detection: 3.0x volume spike, $10,000 whale threshold
-  🔔 Alerts: MEDIUM severity, Discord ❌
-  🌐 Mode: 🟢 Live Trading
-  🔐 Auth: ❌ No CLOB API
-
-[INFO] Starting market discovery...
-[INFO] Found 47 active markets
-[INFO] WebSocket connected successfully
-[INFO] Monitoring started - Press Ctrl+C to stop
-```
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 insider-poly-bot/
-├── main.py                    # Entry point and orchestrator
-├── market_monitor.py          # Main monitoring coordination
-├── insider_config.json        # Default configuration
-├── requirements.txt           # Python dependencies
-├── 
-├── data_sources/             # Data collection modules
-│   ├── data_api_client.py    # Polymarket API client
-│   └── websocket_client.py   # Real-time WebSocket client
+├── main.py                       # Entry point
+├── market_monitor.py             # Orchestrator — market lifecycle and analysis loop
+├── insider_config.json           # Detection thresholds and settings
 │
-├── detection/                # Detection algorithms
-│   ├── volume_detector.py    # Volume spike detection
-│   ├── whale_detector.py     # Large trade detection  
-│   ├── price_detector.py     # Price movement analysis
-│   └── coordination_detector.py # Coordinated trading detection
+├── data_sources/
+│   ├── data_api_client.py        # Polymarket REST API (async aiohttp)
+│   └── websocket_client.py       # Live trade stream
 │
-├── alerts/                   # Alert and notification system
-│   └── alert_manager.py      # Discord/notification management
+├── detection/
+│   ├── base_detector.py          # Abstract base for all detectors
+│   ├── volume_detector.py        # Z-score volume spike detection
+│   ├── whale_detector.py         # Large trade + market maker filtering
+│   ├── price_detector.py         # Price movement and volatility analysis
+│   ├── coordination_detector.py  # Multi-wallet coordination patterns
+│   └── fresh_wallet_detector.py  # New wallet large-bet detection
 │
-├── config/                   # Configuration management
-│   └── settings.py           # Settings parser and validation
+├── alerts/
+│   ├── alert_manager.py          # Multi-channel dispatch + rate limiting
+│   ├── recommendation_engine.py  # Context-aware trade recommendations
+│   ├── telegram_notifier.py      # Telegram Bot API integration
+│   └── formatters.py             # Discord/Telegram message formatting
 │
-└── utils/                    # Utility functions
+├── database/                     # SQLAlchemy models, async session management
+├── config/                       # Settings dataclasses, validation, DB config
+├── cli/                          # Click CLI — whale queries, alert history, stats
+├── dashboard/                    # FastAPI backend + React frontend
+├── common/                       # Shared enums, constants, types
+│
+└── tests/
+    ├── unit/                     # 18 test modules
+    ├── integration/              # 7 test modules (API, DB, WebSocket, E2E)
+    └── conftest.py               # Shared fixtures
 ```
 
-## 🔧 Core Components
-
-### Market Monitor (`market_monitor.py`)
-- **Orchestrates** all data sources and detection algorithms
-- **Manages** market discovery and WebSocket connections
-- **Coordinates** detection analysis and alert generation
-
-### Data Sources
-- **Data API Client**: Fetches historical and current market data
-- **WebSocket Client**: Real-time trade stream processing
-
-### Detection Algorithms
-- **Volume Detector**: Identifies unusual volume spikes using statistical analysis
-- **Whale Detector**: Detects large trades and potential market manipulation
-- **Price Detector**: Analyzes rapid price movements and volatility
-- **Coordination Detector**: Identifies patterns of coordinated trading activity
-
-### Alert System
-- **Configurable severity levels** (LOW, MEDIUM, HIGH, CRITICAL)
-- **Discord webhook integration**
-- **Rate limiting** to prevent spam
-
-## 📊 Detection Capabilities
-
-- **Volume Spike Detection** - Statistical Z-score analysis identifies trades 3x+ above average
-- **Whale Detection** - Tracks large trades ($10K+) and coordinated whale activity
-- **Price Movement Analysis** - Detects rapid price changes (15%+) and volatility spikes
-- **Coordination Detection** - Identifies synchronized trading patterns across multiple wallets
-
-> 📖 **For detailed detection parameters and scoring systems, see [Architecture Guide](ARCHITECTURE.md)**
-
-## 🔐 Security Features
-
-- **No Private Key Storage**: Read-only market monitoring
-- **Configurable Rate Limits**: Prevents API abuse
-- **Environment Variable Security**: Sensitive data in .env files
-- **Comprehensive Logging**: Audit trail for all activities
-
-## 📝 Logs and Output
-
-### Log Files
-- **`insider_bot.log`**: Comprehensive application logs
-- **Console Output**: Real-time monitoring status with colored output
-
-### Activity Reporting
-- **Periodic Market Summaries**: Regular status updates
-- **Detection Alerts**: Immediate notifications for suspicious activity
-- **Debug Mode**: Detailed analysis output for development
-
-## 🤝 Contributing
-
-This bot is designed for educational and research purposes. When contributing:
-
-1. Follow the modular architecture patterns
-2. Add comprehensive logging for new features
-3. Update configuration documentation for new parameters
-4. Include tests for detection algorithms (see [Testing Guide](TESTING.md))
-5. Ensure all tests pass: `python -m pytest`
-
-> 🔧 **Having issues? Check the [Troubleshooting Guide](TROUBLESHOOTING.md) for solutions to common problems.**
-
-## ⚠️ Disclaimer
-
-This bot is for **educational and research purposes only**. It is designed to detect patterns that *may* indicate insider trading but should not be considered definitive proof. Always verify findings through additional research and comply with all applicable laws and regulations.
-
-## 📄 License
-
-[Add your license information here]
-
----
-
-## 💾 Database & Persistence
-
-The bot now includes a robust database persistence layer for tracking alerts, whale addresses, and alert outcomes.
-
-### Database Features
-
-- **Alert Storage**: All alerts are automatically saved to SQLite database
-- **Whale Tracking**: Tracks whale addresses with automatic market maker detection
-- **Outcome Correlation**: Tracks alert outcomes (price movements at 1h, 4h, 24h intervals)
-- **Performance Analytics**: Calculate win rates and profitability of alerts
-
-### Market Maker Detection
-
-Automatically identifies and filters market makers using heuristic scoring (frequency, balance, diversity, consistency). Addresses with score ≥70 are classified as market makers and excluded from whale alerts.
-
-> 📖 **For detailed scoring algorithm, see [Architecture Guide](ARCHITECTURE.md#market-maker-detection)**
-
-**Database Tables**: alerts, alert_outcomes, whale_addresses, whale_alert_associations
-
-> 📖 **For complete schema details, see [Architecture Guide](ARCHITECTURE.md#database-schema)**
-
-## 🖥️ CLI Usage
-
-The bot includes a comprehensive CLI for querying tracked data.
-
-### Installation
+## Getting Started
 
 ```bash
-# Install the package
+# Clone and set up
+git clone https://github.com/charr91/insider-poly-bot.git
+cd insider-poly-bot
+python -m venv insider-env && source insider-env/bin/activate
+pip install -r requirements.txt
+
+# Configure environment (API keys are optional — bot works without them)
+cp .env.example .env
+
+# Run
+python main.py
+```
+
+The bot starts monitoring markets immediately using Polymarket's public APIs. Optional Discord/Telegram webhooks can be configured in `.env` for alert delivery.
+
+## CLI
+
+```bash
 pip install -e .
 
-# Verify installation
-insider-bot --help
+insider-bot run                              # Start the bot
+insider-bot whales top --limit 10            # Top whales by volume
+insider-bot whales list --exclude-mm         # Exclude market makers
+insider-bot alerts recent --severity HIGH    # Recent high-severity alerts
+insider-bot stats performance --days 30      # Alert accuracy stats
 ```
 
-### Running the Bot
+## Documentation
 
-```bash
-# Start the monitoring bot
-insider-bot run
+- [Configuration Guide](CONFIGURATION.md) — All parameters and thresholds
+- [Architecture Guide](ARCHITECTURE.md) — Database schema, detection scoring, design patterns
+- [Usage Guide](USAGE.md) — CLI commands and operational examples
+- [Deployment Guide](DEPLOYMENT.md) — Docker setup and production deployment
 
-# Use custom configuration
-insider-bot run --config my_config.json
+## License
 
-# Use custom database path
-insider-bot --db-path /path/to/data.db run
-```
-
-### Whale Commands
-
-```bash
-# List all tracked whales (excluding market makers)
-insider-bot whales list --limit 20 --exclude-mm
-
-# Show specific whale details
-insider-bot whales show 0x1234567890abcdef...
-
-# Quick top whales summary
-insider-bot whales top --limit 10
-
-# Include market makers
-insider-bot whales list --limit 50 --no-exclude-mm
-
-# Filter by minimum volume
-insider-bot whales list --min-volume 50000
-```
-
-### Alert Commands
-
-```bash
-# Test alert system connections (sends test messages)
-insider-bot alerts test
-
-# Show recent alerts (last 24 hours)
-insider-bot alerts recent --hours 24
-
-# Filter by severity
-insider-bot alerts recent --severity HIGH
-
-# Show specific alert details
-insider-bot alerts show 123
-
-# Get all alerts for a market
-insider-bot alerts by-market <market-id>
-```
-
-#### Testing Alert Connections
-
-Test your Discord and Telegram configurations by sending actual test messages:
-
-```bash
-insider-bot alerts test                      # Test with default config
-insider-bot alerts test --config my_config.json  # Test with custom config
-```
-
-**Prerequisites**: Set `DISCORD_WEBHOOK`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID` in `.env` file.
-
-> 📖 **For detailed alert setup, see [Configuration Guide](CONFIGURATION.md#alert-configuration)**
-
-### Statistics Commands
-
-```bash
-# View alert performance statistics
-insider-bot stats performance --days 30
-
-# System summary
-insider-bot stats summary
-
-# Whale statistics
-insider-bot stats whales
-```
-
-### Database Management Commands
-
-```bash
-# Run database migrations (after code updates)
-insider-bot db migrate --verify
-
-# Check current database schema
-insider-bot db check-schema
-```
-
-**When to use migrations:**
-- After pulling new code from git
-- When encountering "no such column" errors
-- After upgrading to a new version
-
-**Example:**
-```bash
-# After upgrading the bot
-git pull
-docker compose build
-docker compose exec insider-poly-bot insider-bot db migrate --verify
-
-# Check if migration was successful
-docker compose exec insider-poly-bot insider-bot db check-schema
-```
-
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#database-issues) for database-related issues.
-
-### Example CLI Session
-
-```bash
-# Check top whales
-$ insider-bot whales top --limit 5
-Top 5 Whales: 0x1a2b... ($125K, 45 trades), 0x9f8e... ($98.5K, 32 trades)...
-
-# Check performance
-$ insider-bot stats performance --days 7
-Alert Performance (7d): 24 total, 16 profitable (66.7%), Avg: +3.45%
-
-# View recent alerts
-$ insider-bot alerts recent --severity HIGH --hours 12
-2 HIGH alerts: Will Trump... (WHALE), Bitcoin to... (COORD)
-```
-
-> 💻 **For complete CLI documentation, see [Usage Guide](USAGE.md#cli-commands)**
-
-## 🐳 Deployment
-
-### Run with Docker
-
-The bot runs in Docker for easy setup and 24/7 operation.
-
-#### Quick Start
-
-```bash
-# Clone and configure
-git clone <repository-url>
-cd insider-poly-bot
-cp .env.example .env
-nano .env  # Add your API keys
-
-# Start the bot
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-```
-
-See **[DEPLOYMENT.md](DEPLOYMENT.md)** for complete setup instructions, monitoring, and troubleshooting.
-
-For advanced VPS deployment with automated backups and monitoring, see [deployment/ADVANCED.md](deployment/ADVANCED.md).
-
----
-
-**📖 Quick Reference**
-- **Setup**: [Installation](#-installation) → [Configuration](CONFIGURATION.md) → [Quick Start](#-quick-start)
-- **Deploy**: [Docker Setup](#-deployment) → [DEPLOYMENT.md](DEPLOYMENT.md)
-- **Develop**: [Testing Guide](TESTING.md) → [Architecture](ARCHITECTURE.md)
-- **Issues**: [Troubleshooting](TROUBLESHOOTING.md)
+MIT
